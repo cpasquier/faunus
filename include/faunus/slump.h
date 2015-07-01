@@ -2,6 +2,8 @@
 #define FAU_slump_h
 
 #include <random>
+#include <string>
+#include <faunus/json.h>
 
 /// @brief Namespace for Faunus
 namespace Faunus {
@@ -28,6 +30,23 @@ namespace Faunus {
 
         /** @brief Constructor -- default deterministic seed */
         RandomTwister() : dist(0,1) {}
+
+        /**
+         * @brief Construct from JSON object
+         *
+         * The following keywords are read from JSON section "random":
+         *
+         *  Key         | Description
+         * :----------  | :------------------------------------------------
+         * `hardware`   | Non-deterministic hardware seed (default: false) 
+         * `mpidiscard` | Shift sequence on each MPI rank (default: false)
+         */
+        RandomTwister(Tmjson &j, const std::string &sec="random") : dist(0,1) {
+          if ( ( j[sec]["hardware"] | false ) == true )
+            seed();
+          if ( ( j[sec]["mpidiscard"] | false ) == true )
+            setDiscard( 0 ); // <-- put mpi rank here
+        }
 
         /** @brief Integer in uniform range [min:max] */
         int range(int min, int max) {

@@ -875,6 +875,8 @@ namespace Faunus {
             IO::writeFile("bondlist.tcl", VMDBonds( Tbase::list ) );
         }
 
+        void clear() { Tbase::clear(); }
+
         void setSpace(Tspace &s) FOVERRIDE {
           Energybase<Tspace>::setSpace(s);
           if ( Tbase::mlist.empty() )
@@ -1001,8 +1003,7 @@ namespace Faunus {
             _infolist += o.str();
             pot.name.clear();   // potentially save a little bit of memory
             Tbase::add(i,j,pot);// create and add functor to pair list
-            force_list[ typename Tbase::Tpair(i,j) ]
-              = ForceFunctionObject<decltype(pot)>(pot);
+            force_list[ {i,j} ] = ForceFunctionObject<decltype(pot)>(pot);
           }
 
         /** @brief Add harmonic bond */
@@ -2093,9 +2094,13 @@ namespace Faunus {
             Tbase::name = "Hamiltonian";
             auto m = j["energy"];
             for ( auto i=m.begin(); i!=m.end() ; ++i ) {
-              if (i.key()=="nonbonded") {
-                // todo: check for "type" in nonbonded, i.e. "lj", "coulomblj" etc.
-                push_back( Energy::Nonbonded<Tspace, Potential::LennardJonesLB>( j ) ); 
+              if (i.key()=="nonbonded-dhlj")
+                push_back( Energy::Nonbonded<Tspace, Potential::DebyeHuckelLJ>( j, i.key() ) ); 
+              if (i.key()=="cmconstrain") {
+                if ( Tbase::spc!=nullptr )
+                  push_back( Energy::MassCenterConstrain<Tspace>( j, *Tbase::spc ) ); 
+                else
+                  std::cerr << "Warning: call setSpace() on Energy::Hamiltonian.\n";
               }
             }
           }
