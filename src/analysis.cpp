@@ -9,13 +9,12 @@
 namespace Faunus {
 
   namespace Analysis {
-    AnalysisBase::AnalysisBase() : w(30), cnt(0) {
+    AnalysisBase::AnalysisBase() : stepcnt(0), steps(1), w(30), cnt(0) {
       stepcnt = 0;
     }
 
-    AnalysisBase::AnalysisBase(Tmjson &j) : w(30), cnt(0) {
+    AnalysisBase::AnalysisBase(const Tmjson &j) : stepcnt(0), w(30), cnt(0) {
       steps = j["nstep"] | int(1);
-      stepcnt = 0;
     }
 
     AnalysisBase::~AnalysisBase() {}

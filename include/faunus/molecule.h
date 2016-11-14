@@ -522,7 +522,7 @@ namespace Faunus {
     class MoleculeCombination : public PropertyBase {
       public:
 
-        MoleculeCombination( Tmjson::iterator &comb ) {
+        MoleculeCombination( const Tmjson::iterator &comb ) {
           name = comb.key();
           probability = comb.value()["prob"] | 1.0;
           string mollist = comb.value()["molecules"] | string();
@@ -572,7 +572,7 @@ namespace Faunus {
           base::jsonsection = "moleculecombinations";
         }
 
-        bool include( Tmjson &j ) override {
+        bool include( const Tmjson &j ) override {
           bool r = base::include( j );
           update();
           return r;

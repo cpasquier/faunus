@@ -60,7 +60,7 @@ namespace Faunus {
         virtual void _sample();
       public:
         AnalysisBase();
-        AnalysisBase(Tmjson&);
+        AnalysisBase(const Tmjson&);
         virtual ~AnalysisBase();
         string info();       //!< Print info and results
         void test(UnitTest&);//!< Perform unit test
@@ -207,7 +207,7 @@ namespace Faunus {
 
       public:
         template<class Tpotential>
-        VirialPressure( Tmjson &j, Tpotential &pot, Tspace &spc ) : spc(&spc), pot(&pot), AnalysisBase( j ) {
+        VirialPressure( const Tmjson &j, Tpotential &pot, Tspace &spc ) : spc(&spc), pot(&pot), AnalysisBase( j ) {
           dim = j["dim"] | 3;
           area = j["area"] | 0.0;
           noMolecularPressure = j["noMolecularPressure"] | false;
@@ -650,11 +650,9 @@ namespace Faunus {
 
       public:
 
-        PolymerShape() { name="Polymer Shape"; }
-
-        PolymerShape(Tmjson &j, Tspace &spc)  : AnalysisBase(j), spc(&spc) {
+        PolymerShape(const Tmjson &j, Tspace &spc) : AnalysisBase(j), spc(&spc) {
           name="Polymer Shape";
-          auto m = j["mollist"];
+          auto& m = j["mollist"];
           for (auto &i : m) {   // loop over molecule names
             string molname = i.get<string>();
             auto it = spc.molList().find(molname);
@@ -777,9 +775,9 @@ namespace Faunus {
           }
 
         public:
-          ChargeMultipole(Tmjson &j, Tspace &spc)  : AnalysisBase(j), spc(&spc) {
+          ChargeMultipole(const Tmjson &j, Tspace &spc)  : AnalysisBase(j), spc(&spc) {
               name="Charge Multipole";
-              auto m = j["mollist"];
+              auto& m = j["mollist"];
               for (auto &i : m) {   // loop over molecule names
                 string molname = i.get<string>();
                 auto it = spc.molList().find(molname);
@@ -1985,7 +1983,7 @@ namespace Faunus {
           }
 
         public:
-          CylindricalDensity( Tmjson &j, Tspace &spc ) : spc(&spc), data(0.2), AnalysisBase(j) {
+          CylindricalDensity( const Tmjson &j, Tspace &spc ) : spc(&spc), data(0.2), AnalysisBase(j) {
               name="Cylindrical Density";
               zmin    = j["zmin"] | 0.0;
               zmax    = j["zmax"] | -zmin;
@@ -2125,7 +2123,7 @@ namespace Faunus {
           }
 
         public:
-          VirtualVolumeMove( Tmjson &j, Tenergy &pot, Tspace &spc ) : AnalysisBase(j), spc(&spc), pot(&pot) {
+          VirtualVolumeMove( const Tmjson &j, Tenergy &pot, Tspace &spc ) : AnalysisBase(j), spc(&spc), pot(&pot) {
             dV = j["dV"] | 0.1;
             dir = {1,1,1};  // scale directions
             fullenergy = j["fullenergy"] | false;
@@ -2157,8 +2155,8 @@ namespace Faunus {
         CombinedAnalysis(AnalysisBase *a, AnalysisBase *b);
 
         template<class Tspace, class Tpotential>
-          CombinedAnalysis(Tmjson &j, Tpotential &pot, Tspace &spc) {
-            auto m = j["analysis"];
+          CombinedAnalysis(const Tmjson &j, Tpotential &pot, Tspace &spc) {
+            auto& m = j["analysis"];
             for (auto i = m.begin(); i != m.end(); ++i) {
               auto& val = i.value();
               if (i.key() == "virial")

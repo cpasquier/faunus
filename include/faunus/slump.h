@@ -27,7 +27,12 @@ namespace Faunus {
         Tengine eng; //!< Random number engine
 
         /** @brief Constructor -- default deterministic seed */
-        RandomTwister() : dist(0,1), discard(0) {}
+        RandomTwister(bool hardware=false, bool mpidiscard=false) : dist(0,1), discard(0) {
+            if ( hardware )
+                seed();
+            if ( mpidiscard )
+                setDiscard( 0 ); // <-- put mpi rank here
+        }
 
         /**
          * @brief Construct from JSON object
@@ -42,12 +47,9 @@ namespace Faunus {
          * @note `mpidiscard` is under construction.
          */
         template<class Tmjson>
-          RandomTwister(Tmjson &j, const std::string &sec="random") : dist(0,1) {
-            if ( ( j[sec]["hardware"] | false ) == true )
-              seed();
-            if ( ( j[sec]["mpidiscard"] | false ) == true )
-              setDiscard( 0 ); // <-- put mpi rank here
-          }
+          RandomTwister(const Tmjson &j, const std::string &sec="random")
+                  : RandomTwister( j[sec]["hardware"] | false, j[sec]["mpidiscard"] | false),
+                    dist(0,1) {}
 
         /** @brief Integer in uniform range [min:max] */
         int range(int min, int max) {

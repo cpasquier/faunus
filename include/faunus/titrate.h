@@ -73,7 +73,7 @@ namespace Faunus {
         std::map<int, Average<double> > q;       //!< Map of average charges per site
         std::vector<processdata> process;        //!< Vector of processes.
 
-        EquilibriumController( Tmjson& );
+        EquilibriumController( const Tmjson& );
 
         template<class Tpvec>
           void findSites(const Tpvec&);            //!< Locate all titratable sites
@@ -173,7 +173,7 @@ namespace Faunus {
      * as these will be used to reset the charge, radii, weight etc.
      * on all particles in the system.
      */
-    EquilibriumController::EquilibriumController( Tmjson &j ) {
+    EquilibriumController::EquilibriumController( const Tmjson &j ) {
       auto m = j["processes"];
       for ( auto p = m.begin(); p != m.end(); ++p ) {
         cout << "# Reading process " << p.key() << " ... ";

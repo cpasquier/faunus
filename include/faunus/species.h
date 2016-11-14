@@ -128,7 +128,7 @@ namespace Faunus {
     }    
 
     /** Load data from json object */
-    virtual bool include( Tmjson &j ) {
+    virtual bool include( const Tmjson &j ) {
       assert( !jsonsection.empty() );
       auto m = j[ jsonsection ];
       base::reserve( m.size() );
@@ -244,7 +244,7 @@ namespace Faunus {
       bool operator==(const AtomData &d) const { return (*this==d); }
 
       /** @brief Constructor - by default data is initialized; mass set to unity */
-      inline AtomData( Tmjson::iterator &atom ) {
+      inline AtomData( const Tmjson::iterator &atom ) {
 
         auto _js = atom.value();
         if ( ! atom.key().empty() )
