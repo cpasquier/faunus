@@ -1128,7 +1128,7 @@ namespace Faunus {
           WidomScaled(double bjerrumLength, int insertions) {
             assert(insertions>=0);
             assert(bjerrumLength>0);
-            name="Single particle Widom insertion w. charge scaling"; 
+            
             cite="doi:10/ft9bv9 + doi:10/dkv4s6"; 
             lB=bjerrumLength;
             ghostin=insertions;
@@ -1920,6 +1920,11 @@ namespace Faunus {
           }
       };
 
+    /** Calculates the particle density in function of the x axis in a periodic cylinder:
+     * the script counts the number of particles in cylinder slices (default thickness of the slices = 0.2 angstroms).
+     * M.Lund 2016
+     */
+
     template<typename Tspace>
       class CylindricalDensity : public AnalysisBase {
         private:
@@ -1982,6 +1987,77 @@ namespace Faunus {
           }
       };
 
+    /** Calculates the total charge of the particles contained in a slice of a periodic cylinder
+     * 
+     */ 
+
+    template<typename Tspace>
+      class ChargeDistribution : public AnalysisBase {
+        private:
+
+          //int id;      // can be removed
+          //double zmin, zmax, dz, area;
+          //Tspace* spc;
+          Table2D<double, Average<double> > data;   
+          //Table2D<double, double > data;          
+
+          inline string _info() override {
+            using namespace Faunus::textio;
+            std::ostringstream o;
+            if (cnt>0) {
+            }
+            return o.str();
+          }
+
+        public:
+          ChargeDistribution(Tspace &spc, short id, double zmin, double zmax, double dz) {
+          //inline void _sample() override {
+          //void meas(Tspace &spc, short id, double zmin, double zmax, double dz) {
+	    for (double z=zmin; z<=zmax; z+=dz) {
+              double q=0.0;    
+              for (auto &i : spc->p)
+                if (i.id == id)     // can be removed
+                  if (i.z()>=z)
+                    if (i.z()<z+dz)
+	              q+=i.charge;
+              data(z) += q;
+            }
+          }
+
+        //public:
+          //ChargeDistribution( Tmjson &j, Tspace &spc, string pfx="chargedistri" )
+            //: spc(&spc), data(0.2), AnalysisBase( j["analysis"][pfx] ) {
+              //name="Charge Distribution";
+              //auto _j = j["analysis"][pfx];
+              //zmin    = _j["zmin"] | 0.0;
+              //zmax    = _j["zmax"] | -zmin;
+              //dz      = _j["dz"] | 0.2;
+
+              //string atomtype = _j["atomtype"] | string();   //can be removed
+              //cout << "atomtype = " << atomtype << endl;     //
+              //id      = atom[ atomtype ].id;                 //
+        
+              //auto ptr = dynamic_cast< Geometry::Cylinder* >( &(spc.geo) );
+              //if (ptr!=nullptr)
+                //area = std::acos(-1) * pow(ptr->getRadius(), 2);
+              //else area=0;
+              //cout << "area = " << area << endl;
+            //}
+
+          void save(const string &file) {
+            //unsigned int n=0;
+            //for (auto i : spc->p)
+              //if (i.id==id)
+                //n++;
+            data.save(file, 1.0 );
+          }
+
+          //~ChargeDistribution() {
+            //save("chargedistri.dat");
+          //}
+      };
+
+
     /**
      * @brief Class for accumulating analysis classes
      *
@@ -2013,7 +2089,9 @@ namespace Faunus {
                 v.push_back(new PolymerShape<Tspace>(j, spc));
               if (i.key() == "cyldensity")
                 v.push_back(new CylindricalDensity<Tspace>(j, spc));
-            }
+              //if (i.key() == "chargedistri")
+                //v.push_back(new ChargeDistribution<Tspace>(j, spc));
+             }
           }
 
         /** @brief Find pointer to given analysis type; `nullptr` if not found. */

@@ -1369,6 +1369,10 @@ namespace Faunus {
             string molname = spc->molList()[ i.first ].name;
             string mobname  = m[molname]["clustergroup"] | string();
             threshold       = m[molname]["threshold"] | 0.0;
+            dp_trans = m[molname]["dp"];    //Bjorn (start)
+            dp_rot = m[molname]["dprot"];
+            dir.x()=dir.y()=0;
+            dir.z()=1;                      //Bjorn (end)
 
             auto mob = spc->findMolecules( mobname ); // mobile atoms to include in move
             if ( mob.size()==1 )
@@ -1415,9 +1419,9 @@ namespace Faunus {
           assert( ! igroup->empty() );
           auto it = this->mollist.find( this->currentMolId );
           if ( it != this->mollist.end() ) {
-            dp_trans = it->second.dp1;
-            dp_rot = it->second.dp2;
-            dir = it->second.dir;
+            //dp_trans = it->second.dp1;
+            //dp_rot = it->second.dp2;
+            //dir = it->second.dir;
           }
         }
 
