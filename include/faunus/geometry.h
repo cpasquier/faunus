@@ -73,7 +73,7 @@ namespace Faunus
         virtual void boundary( Point & ) const =0;             //!< Apply boundary conditions to a point
         virtual void scale( Point &, Point &, const double, const double ) const;  //!< Scale point
         virtual double sqdist( const Point &a, const Point &b ) const =0; //!< Squared distance between two points
-        virtual Point vdist( const Point &, const Point & )=0;  //!< Distance in vector form
+        virtual Point vdist( const Point &, const Point & ) const =0;  //!< Distance in vector form
 
         virtual Cuboid inscribe() const; //!< Inscribe geometry in a cuboid
 
@@ -123,7 +123,7 @@ namespace Faunus
         /**
 	 * @warning Not true!
 	 */
-        inline Point vdist(const Point &a, const Point &b) override { return a-b; }
+        inline Point vdist(const Point &a, const Point &b) const override { return a-b; }
 
         void scale(Point&, Point &, const double, const double) const override; //!< Linear scaling along radius (NPT ensemble)
 
@@ -162,7 +162,7 @@ namespace Faunus
             return (a - b).squaredNorm();
         }
 
-        inline Point vdist( const Point &a, const Point &b ) override { return a - b; }
+        inline Point vdist( const Point &a, const Point &b ) const override { return a - b; }
 
         void scale( Point &,
                     Point &,
@@ -234,7 +234,7 @@ namespace Faunus
             // return (d-k.cast<double>().cwiseProduct(len)).squaredNorm();
         }
 
-        inline Point vdist( const Point &a, const Point &b ) override
+        inline Point vdist( const Point &a, const Point &b ) const override
         {
             Point r = a - b;
             if ( r.x() > len_half.x())
@@ -293,7 +293,7 @@ namespace Faunus
             return dx * dx + dy * dy + dz * dz;
         }
 
-        inline Point vdist( const Point &a, const Point &b ) override
+        inline Point vdist( const Point &a, const Point &b ) const override
         {
             Point r(a - b);
             if ( r.x() > len_half.x())
@@ -322,7 +322,7 @@ namespace Faunus
         CuboidNoPBC();
         CuboidNoPBC( Tmjson & );
 
-        inline Point vdist( const Point &a, const Point &b ) override { return a - b; }
+        inline Point vdist( const Point &a, const Point &b ) const override { return a - b; }
 
         inline double sqdist( const Point &a, const Point &b ) const override { return (a - b).squaredNorm(); }
 
@@ -366,7 +366,7 @@ namespace Faunus
             return (a - b).squaredNorm();
         }
 
-        inline Point vdist( const Point &a, const Point &b ) override
+        inline Point vdist( const Point &a, const Point &b ) const override
         {
             return a - b;
         }
@@ -399,7 +399,7 @@ namespace Faunus
             return dx * dx + dy * dy + dz * dz;
         }
 
-        inline Point vdist( const Point &a, const Point &b ) override
+        inline Point vdist( const Point &a, const Point &b ) const override
         {
             Point r = a - b;
             if ( r.z() > _halflen )
@@ -446,47 +446,77 @@ namespace Faunus
         return cm;
     }
 
+
+    /**
+     * @brief Calculate geometrical center of cluster of groups
+     * @param spc Space
+     * @param group Vector of pointers to the groups in the cluster
+     */
+    template<class Tgeo, class Tparticles, class GroupIndex>
+	    Point trigoComCluster( const Tgeo &geo, const Tparticles &p, const GroupIndex &groups, const std::vector<int> &dir = {0, 1, 2} )
+	    {
+		    assert(!dir.empty() && dir.size() <= 3);
+		    Point xhi(0, 0, 0), zeta(0, 0, 0), theta(0, 0, 0), com(0, 0, 0);
+		    for ( auto k : dir ) {
+			    double q = 2 * pc::pi / geo.len[k];
+			    size_t N=0;
+			    for (auto i : groups)
+				    for (auto particle : *i) {
+					    Point pos = p[particle];
+					    theta[k] = pos[k] * q;
+					    zeta[k] += std::sin(theta[k]);
+					    xhi[k] += std::cos(theta[k]);
+					    N++;
+				    }
+			    theta[k] = std::atan2(-zeta[k] / N, -xhi[k] / N) + pc::pi;
+			    com[k] = geo.len[k] * theta[k] / (2 * pc::pi);
+		    }
+		    geo.boundary(com); // is this really needed?
+		    return com;
+	    }
+
+
     /** @brief Calculate mass center of cluster of particles */
     template<class Tgeo, class Tpvec, class TGroup>
-    Point massCenter( const Tgeo &geo, const Tpvec &p, const TGroup &g )
-    {
-        return anyCenter(geo, p, g,
-                         []( const typename Tpvec::value_type &x ) { return x.mw; });
-    }
+	    Point massCenter( const Tgeo &geo, const Tpvec &p, const TGroup &g )
+	    {
+		    return anyCenter(geo, p, g,
+				    []( const typename Tpvec::value_type &x ) { return x.mw; });
+	    }
 
     /** @brief Calculate mass center of a particle vector */
     template<typename Tgeometry, typename Tp_vec>
-    Point massCenter( const Tgeometry &geo, const Tp_vec &p )
-    {
-        if ( p.empty())
-            return Point(0, 0, 0);
-        return massCenter(geo, p, Group(0, p.size() - 1));
-    }
+	    Point massCenter( const Tgeometry &geo, const Tp_vec &p )
+	    {
+		    if ( p.empty())
+			    return Point(0, 0, 0);
+		    return massCenter(geo, p, Group(0, p.size() - 1));
+	    }
 
     /** @brief Calculate charge center of cluster of particles */
     template<class Tgeo, class Tpvec, class TGroup>
-    Point chargeCenter( const Tgeo &geo, const Tpvec &p, const TGroup &g )
-    {
-        return anyCenter(geo, p, g,
-                         []( const typename Tpvec::value_type &x ) { return std::fabs(x.charge); });
-    }
+	    Point chargeCenter( const Tgeo &geo, const Tpvec &p, const TGroup &g )
+	    {
+		    return anyCenter(geo, p, g,
+				    []( const typename Tpvec::value_type &x ) { return std::fabs(x.charge); });
+	    }
 
     /** @brief Calculate charge center of a particle vector */
     template<typename Tgeometry, typename Tp_vec>
-    Point chargeCenter( const Tgeometry &geo, const Tp_vec &p )
-    {
-        if ( p.empty())
-            return Point(0, 0, 0);
-        return chargeCenter(geo, p, Group(0, p.size() - 1));
-    }
+	    Point chargeCenter( const Tgeometry &geo, const Tp_vec &p )
+	    {
+		    if ( p.empty())
+			    return Point(0, 0, 0);
+		    return chargeCenter(geo, p, Group(0, p.size() - 1));
+	    }
 
     /** @brief Calculate geometric center of cluster of particles */
     template<class Tgeo, class Tpvec, class TGroup>
-    Point geometricCenter( const Tgeo &geo, const Tpvec &p, const TGroup &g )
-    {
-        return anyCenter(geo, p, g,
-                         []( const typename Tpvec::value_type &x ) { return 1.0; });
-    }
+	    Point geometricCenter( const Tgeo &geo, const Tpvec &p, const TGroup &g )
+	    {
+		    return anyCenter(geo, p, g,
+				    []( const typename Tpvec::value_type &x ) { return 1.0; });
+	    }
 
     /**
      * @brief Electric dipole moment
@@ -496,19 +526,19 @@ namespace Faunus
      * @param mu Initial dipole moment (default: [0,0,0])
      */
     template<class Tspace, class Tgroup>
-    Point dipoleMoment( const Tspace &s, const Tgroup &g, double cutoff = 1e9, Point mu = Point(0, 0, 0))
-    {
-        assert(g.size() <= (int) s.p.size());
-        for ( auto i : g )
-        {
-            Point t = s.p[i] - g.cm;
-            s.geo.boundary(t);
-            if ( t.squaredNorm() < cutoff * cutoff )
-                mu += t * s.p[i].charge;
-        }
-        return mu;
-    }
-    
+	    Point dipoleMoment( const Tspace &s, const Tgroup &g, double cutoff = 1e9, Point mu = Point(0, 0, 0))
+	    {
+		    assert(g.size() <= (int) s.p.size());
+		    for ( auto i : g )
+		    {
+			    Point t = s.p[i] - g.cm;
+			    s.geo.boundary(t);
+			    if ( t.squaredNorm() < cutoff * cutoff )
+				    mu += t * s.p[i].charge;
+		    }
+		    return mu;
+	    }
+
     /**
      * @brief Electric quadrupole moment
      * @param s Space
@@ -517,61 +547,61 @@ namespace Faunus
      * @param quad Initial quadrupole moment (default: [0 0 0,0 0 0,0 0 0])
      */
     template<class Tspace, class Tgroup, class T=double>
-      Tensor<T> quadrupoleMoment(const Tspace &s, const Tgroup &g, double cutoff=1e9, Tensor<T> quad=Tensor<T>()) {
-        assert(g.size()<=(int)s.p.size());
-        for (auto i : g) {
-          Point t=s.p[i] - g.cm;
-          s.geo.boundary(t);
-          if(t.squaredNorm() < cutoff*cutoff)  {
-	    Tensor<T> temp = t*t.transpose();
-            quad += temp*s.p[i].charge;
-	  }
-        }
-        return quad;
-      }
+	    Tensor<T> quadrupoleMoment(const Tspace &s, const Tgroup &g, double cutoff=1e9, Tensor<T> quad=Tensor<T>()) {
+		    assert(g.size()<=(int)s.p.size());
+		    for (auto i : g) {
+			    Point t=s.p[i] - g.cm;
+			    s.geo.boundary(t);
+			    if(t.squaredNorm() < cutoff*cutoff)  {
+				    Tensor<T> temp = t*t.transpose();
+				    quad += temp*s.p[i].charge;
+			    }
+		    }
+		    return quad;
+	    }
 
     /**
      * @brief Calculates quadrupole moment tensor (with trace)
      */
     template<class Tpvec, class Tgroup, class Tgeo>
-        Tensor<double> quadrupoleMoment( const Tpvec &p, const Tgeo &geo, const Tgroup &g )
-        {
-            Tensor<double> theta;
-            theta.setZero();
-            assert(g.size() <= (int) p.size());
-            for ( auto i : g )
-            {
-                Point t = p[i] - g.cm;
-                geo.boundary(t);
-                theta = theta + t * t.transpose() * p[i].charge;
-            }
-            return 0.5 * theta;
-        }
+	    Tensor<double> quadrupoleMoment( const Tpvec &p, const Tgeo &geo, const Tgroup &g )
+	    {
+		    Tensor<double> theta;
+		    theta.setZero();
+		    assert(g.size() <= (int) p.size());
+		    for ( auto i : g )
+		    {
+			    Point t = p[i] - g.cm;
+			    geo.boundary(t);
+			    theta = theta + t * t.transpose() * p[i].charge;
+		    }
+		    return 0.5 * theta;
+	    }
 
     /** @brief Translate a particle vector by a vector */
     template<class Tgeo, class Tpvec>
-    void translate( const Tgeo &geo, Tpvec &p, const Point &d )
-    {
-        for ( auto &pi : p )
-        {
-            pi += d;
-            geo.boundary(pi);
-        }
-    }
+	    void translate( const Tgeo &geo, Tpvec &p, const Point &d )
+	    {
+		    for ( auto &pi : p )
+		    {
+			    pi += d;
+			    geo.boundary(pi);
+		    }
+	    }
 
     /** @brief Translate a particle vector so mass center is in (0,0,0) */
     template<class Tgeo, class Tpvec>
-    void cm2origo( const Tgeo &geo, Tpvec &p )
-    {
-        translate(geo, p, -massCenter(geo, p));
-    }
+	    void cm2origo( const Tgeo &geo, Tpvec &p )
+	    {
+		    translate(geo, p, -massCenter(geo, p));
+	    }
 
     /** @brief Translate a particle vector so charge center is in (0,0,0) */
     template<class Tgeo, class Tpvec>
-    void cc2origo( const Tgeo &geo, Tpvec &p )
-    {
-        translate(geo, p, -chargeCenter(geo, p));
-    }
+	    void cc2origo( const Tgeo &geo, Tpvec &p )
+	    {
+		    translate(geo, p, -chargeCenter(geo, p));
+	    }
 
     /**
      * @brief Quaternion rotation routine using the Eigen library
@@ -579,56 +609,56 @@ namespace Faunus
      */
     class QuaternionRotate
     {
-    private:
-        double angle_;
-        Eigen::Vector3d origin;
-        Eigen::Quaterniond q;
-        Eigen::Matrix3d rot_mat; // rotation matrix
-        Geometrybase *geoPtr;
+	    private:
+		    double angle_;
+		    Eigen::Vector3d origin;
+		    Eigen::Quaterniond q;
+		    Eigen::Matrix3d rot_mat; // rotation matrix
+		    Geometrybase *geoPtr;
 
-    public:
-        //!< Get rotation origin
-        Eigen::Vector3d &getOrigin() { return origin; }
+	    public:
+		    //!< Get rotation origin
+		    Eigen::Vector3d &getOrigin() { return origin; }
 
-        //!< Get rotation origin
-        Eigen::Vector3d getOrigin() const { return origin; }
+		    //!< Get rotation origin
+		    Eigen::Vector3d getOrigin() const { return origin; }
 
-        //!< Get set rotation angle
-        double getAngle() const { return angle_; }
+		    //!< Get set rotation angle
+		    double getAngle() const { return angle_; }
 
-        bool ignoreBoundaries;
+		    bool ignoreBoundaries;
 
-        QuaternionRotate()
-        {
-            ignoreBoundaries = false;
-        }
+		    QuaternionRotate()
+		    {
+			    ignoreBoundaries = false;
+		    }
 
-        /**
-         * @brief Set rotation axis and angle
-         * @param g Geometry to use for periodic boundaries (if any)
-         * @param beg Starting point for vector to rotate around
-         * @param end Ending point for vector to rotate around
-         * @param angle Radians to rotate
-         */
-        void setAxis( Geometrybase &g, const Point &beg, const Point &end, double angle );
+		    /**
+		     * @brief Set rotation axis and angle
+		     * @param g Geometry to use for periodic boundaries (if any)
+		     * @param beg Starting point for vector to rotate around
+		     * @param end Ending point for vector to rotate around
+		     * @param angle Radians to rotate
+		     */
+		    void setAxis( Geometrybase &g, const Point &beg, const Point &end, double angle );
 
-        /** @brief Rotate point - respect boundaries */
-        inline Point operator()( Point a ) const
-        {
-            if ( ignoreBoundaries )
-                return q * a;
-            a = a - origin;
-            geoPtr->boundary(a);
-            a = q * a + origin;
-            geoPtr->boundary(a);
-            return a;
-        }
+		    /** @brief Rotate point - respect boundaries */
+		    inline Point operator()( Point a ) const
+		    {
+			    if ( ignoreBoundaries )
+				    return q * a;
+			    a = a - origin;
+			    geoPtr->boundary(a);
+			    a = q * a + origin;
+			    geoPtr->boundary(a);
+			    return a;
+		    }
 
-        inline Eigen::Matrix3d operator()( Eigen::Matrix3d a ) const
-        {
-            a = rot_mat * a * rot_mat.transpose();
-            return a;
-        }
+		    inline Eigen::Matrix3d operator()( Eigen::Matrix3d a ) const
+		    {
+			    a = rot_mat * a * rot_mat.transpose();
+			    return a;
+		    }
     };
 
     /**
@@ -640,85 +670,85 @@ namespace Faunus
      */
     class FindSpace
     {
-    private:
-        template<class Tgeometry, class Tpvec>
-        bool matterOverlap( const Tgeometry &geo, const Tpvec &p1, const Tpvec &p2 ) const
-        {
-            if ( allowMatterOverlap == false )
-                for ( auto &i : p1 )
-                    for ( auto &j : p2 )
-                    {
-                        double max = i.radius + j.radius;
-                        if ( geo.sqdist(i, j) < max * max )
-                            return true;
-                    }
-            return false;
-        }
+	    private:
+		    template<class Tgeometry, class Tpvec>
+			    bool matterOverlap( const Tgeometry &geo, const Tpvec &p1, const Tpvec &p2 ) const
+			    {
+				    if ( allowMatterOverlap == false )
+					    for ( auto &i : p1 )
+						    for ( auto &j : p2 )
+						    {
+							    double max = i.radius + j.radius;
+							    if ( geo.sqdist(i, j) < max * max )
+								    return true;
+						    }
+				    return false;
+			    }
 
-        template<class Tgeometry, class Tpvec>
-        bool containerOverlap( const Tgeometry &geo, const Tpvec &p ) const
-        {
-            if ( allowContainerOverlap == false )
-                for ( auto &i : p )
-                    if ( geo.collision(i, i.radius))
-                        return true;
-            return false;
-        }
+		    template<class Tgeometry, class Tpvec>
+			    bool containerOverlap( const Tgeometry &geo, const Tpvec &p ) const
+			    {
+				    if ( allowContainerOverlap == false )
+					    for ( auto &i : p )
+						    if ( geo.collision(i, i.radius))
+							    return true;
+				    return false;
+			    }
 
-    public:
-        Point dir;                  //!< default = [1,1,1]
-        bool allowContainerOverlap; //!< default = false;
-        bool allowMatterOverlap;    //!< default = false;
+	    public:
+		    Point dir;                  //!< default = [1,1,1]
+		    bool allowContainerOverlap; //!< default = false;
+		    bool allowMatterOverlap;    //!< default = false;
 
-        FindSpace();
+		    FindSpace();
 
-        /**
-         * @param geo Geometry to use
-         * @param dst Destination particle vector (will not be touched!)
-         * @param p Particle vector to find space for. Coordinates will be changed.
-         * @param maxtrials Number of times to try before timeout.
-         */
-        template<class Tgeometry, class Tpvec>
-        bool find( Tgeometry &geo, const Tpvec &dst, Tpvec &p, int maxtrials = 1e3 ) const
-        {
-            using namespace textio;
-            cout << "Trying to insert " << p.size() << " particle(s)";
-            Point v;
-            do
-            {
-                cout << ".";
-                maxtrials--;
-                Point cm = massCenter(geo, p);
-                geo.randompos(v);
-                v = v.cwiseProduct(dir);
-                translate(geo, p, -cm + v);
-            }
-            while ( maxtrials > 0 && (containerOverlap(geo, p) || matterOverlap(geo, p, dst)));
-            if ( maxtrials > 0 )
-            {
-                cout << " OK!\n";
-                return true;
-            }
-            cout << " timeout!\n";
-            assert(!"Timeout - found no space for particle(s).");
-            return false;
-        }
+		    /**
+		     * @param geo Geometry to use
+		     * @param dst Destination particle vector (will not be touched!)
+		     * @param p Particle vector to find space for. Coordinates will be changed.
+		     * @param maxtrials Number of times to try before timeout.
+		     */
+		    template<class Tgeometry, class Tpvec>
+			    bool find( Tgeometry &geo, const Tpvec &dst, Tpvec &p, int maxtrials = 1e3 ) const
+			    {
+				    using namespace textio;
+				    cout << "Trying to insert " << p.size() << " particle(s)";
+				    Point v;
+				    do
+				    {
+					    cout << ".";
+					    maxtrials--;
+					    Point cm = massCenter(geo, p);
+					    geo.randompos(v);
+					    v = v.cwiseProduct(dir);
+					    translate(geo, p, -cm + v);
+				    }
+				    while ( maxtrials > 0 && (containerOverlap(geo, p) || matterOverlap(geo, p, dst)));
+				    if ( maxtrials > 0 )
+				    {
+					    cout << " OK!\n";
+					    return true;
+				    }
+				    cout << " timeout!\n";
+				    assert(!"Timeout - found no space for particle(s).");
+				    return false;
+			    }
 
-        template<class Tgeometry, class Tpvec>
-        bool find( const Tpvec &dst, Tpvec &p, Tgeometry &geo ) const
-        {
+		    template<class Tgeometry, class Tpvec>
+			    bool find( const Tpvec &dst, Tpvec &p, Tgeometry &geo ) const
+			    {
 
-            Point v;
-            Point cm = massCenter(geo, p);
-            geo.randompos(v);
-            v = v.cwiseProduct(dir);
-            translate(geo, p, -cm + v);
+				    Point v;
+				    Point cm = massCenter(geo, p);
+				    geo.randompos(v);
+				    v = v.cwiseProduct(dir);
+				    translate(geo, p, -cm + v);
 
-            if ( !containerOverlap(geo, p) && !matterOverlap(geo, p, dst))
-                return true;
+				    if ( !containerOverlap(geo, p) && !matterOverlap(geo, p, dst))
+					    return true;
 
-            return false;
-        }
+				    return false;
+			    }
     };
 
     /**
@@ -736,51 +766,51 @@ namespace Faunus
      *       box vs. molecular volume (i.e. 1:1)
      */
     template<typename Tpvec>
-    double calcVolume( const Tpvec &p, unsigned int n = 1e7, double pradius = 0 )
-    {
-        double L = 0;      // size of test box
-        Point gc(0, 0, 0); // geometric center of molecule
-        for ( auto &i : p )
-            gc += i / p.size();
-        for ( auto &i : p )
-            L = std::max(L, 2 * ((i - gc).norm() + i.radius + pradius));
+	    double calcVolume( const Tpvec &p, unsigned int n = 1e7, double pradius = 0 )
+	    {
+		    double L = 0;      // size of test box
+		    Point gc(0, 0, 0); // geometric center of molecule
+		    for ( auto &i : p )
+			    gc += i / p.size();
+		    for ( auto &i : p )
+			    L = std::max(L, 2 * ((i - gc).norm() + i.radius + pradius));
 
-        // Start shooting!
-        Point r;
-        unsigned int hit = 0, cnt = 0;
-        while ( ++cnt < n )
-        {
-            r.x() = slump.half();
-            r.y() = slump.half();
-            r.z() = slump.half();
-            r = r * L + gc;
-            for ( auto &i : p )
-                if ((i - r).squaredNorm() < pow(i.radius + pradius, 2))
-                {
-                    hit++;
-                    break;
-                }
-        }
-        return hit / double(cnt) * pow(L, 3);
-    }
+		    // Start shooting!
+		    Point r;
+		    unsigned int hit = 0, cnt = 0;
+		    while ( ++cnt < n )
+		    {
+			    r.x() = slump.half();
+			    r.y() = slump.half();
+			    r.z() = slump.half();
+			    r = r * L + gc;
+			    for ( auto &i : p )
+				    if ((i - r).squaredNorm() < pow(i.radius + pradius, 2))
+				    {
+					    hit++;
+					    break;
+				    }
+		    }
+		    return hit / double(cnt) * pow(L, 3);
+	    }
 
     /** @brief Check for hard-core overlap between two particles (true if overlap) */
     template<typename Tgeometry, typename Tparticle>
-    bool overlap( const Tgeometry &geo, const Tparticle &a, const Tparticle &b )
-    {
-        auto dmin = a.radius + b.radius;
-        return (geo.sqdist(a, b) < dmin * dmin) ? true : false;
-    }
+	    bool overlap( const Tgeometry &geo, const Tparticle &a, const Tparticle &b )
+	    {
+		    auto dmin = a.radius + b.radius;
+		    return (geo.sqdist(a, b) < dmin * dmin) ? true : false;
+	    }
 
     /** @brief Check for hard-core overlap between a vector of particles and a particle (true if overlap) */
     template<typename Tgeometry, typename Tparticle, typename Talloc>
-    bool overlap( const Tgeometry &geo, const std::vector<Tparticle, Talloc> &p, const Tparticle &j )
-    {
-        for ( auto &i : p )
-            if ( overlap(geo, i, j))
-                return true;
-        return false;
-    }
+	    bool overlap( const Tgeometry &geo, const std::vector<Tparticle, Talloc> &p, const Tparticle &j )
+	    {
+		    for ( auto &i : p )
+			    if ( overlap(geo, i, j))
+				    return true;
+		    return false;
+	    }
 
     /**
      * @brief Calculates the gyration tensor of a molecular group
@@ -796,17 +826,17 @@ namespace Faunus
      *
      */
     template<typename Tgeometry, typename Tpvec, typename Tgroup>
-    Tensor<double> gyration( Tgeometry &geo, Tpvec &p, Tgroup &g, const Point &cm )
-    {
-        Tensor<double> S;
-        for ( auto i : g )
-        {
-            Point t = p[i] - cm;
-            geo.boundary(t);
-            S += t * t.transpose();
-        }
-        return S * (1. / g.size());
-    }
+	    Tensor<double> gyration( Tgeometry &geo, Tpvec &p, Tgroup &g, const Point &cm )
+	    {
+		    Tensor<double> S;
+		    for ( auto i : g )
+		    {
+			    Point t = p[i] - cm;
+			    geo.boundary(t);
+			    S += t * t.transpose();
+		    }
+		    return S * (1. / g.size());
+	    }
 
     /* 
      * @brief Calculate mass center of cluster of particles in unbounded environment 
@@ -827,26 +857,26 @@ namespace Faunus
      * @todo Rename?
      */
     template<class Tgeo, class Tpvec, class TGroup>
-    Point trigoCom( const Tgeo &geo, const Tpvec &p, const TGroup &g, const vector<int> &dir = {0, 1, 2} )
-    {
-        assert(!dir.empty() && dir.size() <= 3);
-        double N = g.size();
-        Point xhi(0, 0, 0), zeta(0, 0, 0), theta(0, 0, 0), com(0, 0, 0);
-        for ( auto k : dir )
-        {
-            double q = 2 * pc::pi / geo.len[k];
-            for ( auto i : g )
-            {
-                theta[k] = p[i][k] * q;
-                zeta[k] += std::sin(theta[k]);
-                xhi[k] += std::cos(theta[k]);
-            }
-            theta[k] = std::atan2(-zeta[k] / N, -xhi[k] / N) + pc::pi;
-            com[k] = geo.len[k] * theta[k] / (2 * pc::pi);
-        }
-        geo.boundary(com);
-        return com;
-    }
+	    Point trigoCom( const Tgeo &geo, const Tpvec &p, const TGroup &g, const vector<int> &dir = {0, 1, 2} )
+	    {
+		    assert(!dir.empty() && dir.size() <= 3);
+		    double N = g.size();
+		    Point xhi(0, 0, 0), zeta(0, 0, 0), theta(0, 0, 0), com(0, 0, 0);
+		    for ( auto k : dir )
+		    {
+			    double q = 2 * pc::pi / geo.len[k];
+			    for ( auto i : g )
+			    {
+				    theta[k] = p[i][k] * q;
+				    zeta[k] += std::sin(theta[k]);
+				    xhi[k] += std::cos(theta[k]);
+			    }
+			    theta[k] = std::atan2(-zeta[k] / N, -xhi[k] / N) + pc::pi;
+			    com[k] = geo.len[k] * theta[k] / (2 * pc::pi);
+		    }
+		    geo.boundary(com);
+		    return com;
+	    }
   }//namespace Geometry
 }//namespace Faunus
 #endif

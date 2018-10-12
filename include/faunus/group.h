@@ -192,167 +192,205 @@ namespace Faunus
               spc.trial[i].translate(spc.geo, p);
       }
 
+
       /**
-       * @brief Rotate around a vector
+       * @brief Rotate around a vector, with start point
        * @param spc Simulation space
        * @param endpoint End point of rotation axis, starting from the mass center
        * @param angle [rad]
+       * @param startpoint
        */
-      template<class Tspace>
-      void rotate( Tspace &spc, const Point &endpoint, double angle )
-      {
-          assert(spc.geo.dist(cm, massCenter(spc)) < 1e-6);
-          Geometry::QuaternionRotate vrot1;
-          cm_trial = cm;
-          vrot1.setAxis(spc.geo, cm, endpoint, angle);//rot around CM->point vec
-          auto vrot2 = vrot1;
-          vrot2.getOrigin() = Point(0, 0, 0);
-          for ( auto i : *this )
-          {
-              spc.trial[i] = vrot1(spc.trial[i]); // rotate coordinates
-              spc.trial[i].rotate(vrot2);         // rotate internal coordinates
-          }
-          assert(spc.geo.dist(cm_trial, massCenter(spc)) < 1e-9
-                     && "Rotation messed up mass center. Is the box too small?");
-      }
 
-      /**
-       * @brief Get the i'th molecule in the group
-       * @warning You must manually update the mass center of the returned group
-       */
-      template<class Tgroup>
-      void getMolecule( int i, Tgroup &sel ) const
-      {
-          sel.setfront(front() + i * molsize);
-          sel.setback(sel.front() + molsize - 1);
-          sel.setMolSize(sel.size());
+       template<class Tspace>
+       void rotate( Tspace &spc, const Point &endpoint, double angle )
+       {
+           assert(spc.geo.dist(cm, massCenter(spc)) < 1e-6);
+           Geometry::QuaternionRotate vrot1;
+           cm_trial = cm;
+           vrot1.setAxis(spc.geo, cm, endpoint, angle);//rot around CM->point vec
+           auto vrot2 = vrot1;
+           vrot2.getOrigin() = Point(0, 0, 0);
+           for ( auto i : *this )
+           {
+               spc.trial[i] = vrot1(spc.trial[i]); // rotate coordinates
+               spc.trial[i].rotate(vrot2);         // rotate internal coordinates
+           }
+           assert(spc.geo.dist(cm_trial, massCenter(spc)) < 1e-9
+                      && "Rotation messed up mass center. Is the box too small?");
+     }
 
-          assert(sel.molsize > 0);
-          assert((sel.size() % molsize) == 0);
-          assert(sel.isMolecular());
-          assert(find(sel.front()));
-          assert(find(sel.back()));
-      }
 
-      /**
-       * @brief Get the i'th molecule in the group
-       * @warning You must manually update the mass center of the returned group
-       */
-      Group getMolecule( int i ) const
-      {
-          Group sel(name, front() + i * molsize, front() + i * molsize + molsize - 1);
-          sel.molId = this->molId;
-          sel.setMolSize(molsize);
+       template<class Tspace>
+       void rotatecluster( Tspace &spc, const Point &endpoint, double angle, const Point &startpoint )
+       {
+           assert(spc.geo.dist(cm, massCenter(spc)) < 1e-6 && "CM is wrong");
+           if(spc.geo.dist(cm, massCenter(spc)) > 1e-6 )
+		cout << "rc: FA wrong!" << endl;
+           
+           assert((cm_trial-cm).norm() < 1e-6 && "Trial centers are not the same!");
+           if((cm_trial-cm).norm() > 1e-6 )
+		cout << "rc: SA wrong!" << endl;
+	   
+           assert(spc.geo.dist(cm_trial, Geometry::massCenter(spc.geo,spc.trial,*this)) < 1e-9
+			   && "First: Rotation messed up mass center. Is the box too small?");
+           if(spc.geo.dist(cm_trial, Geometry::massCenter(spc.geo,spc.trial,*this)) > 1e-9 )
+		cout << "rc: TA wrong!" << endl;
+           Geometry::QuaternionRotate vrot1;
+           auto vrot2 = vrot1;
+           vrot2.getOrigin() = Point(0, 0, 0);
+           cm_trial = cm;
+           vrot1.setAxis(spc.geo, startpoint, endpoint, angle);//rot around CM->point vec
+	   cm_trial = vrot1(cm_trial); // rotate coordinates
 
-          assert(sel.back() <= this->back());
-          assert(sel.molsize > 0);
-          assert((sel.size() % molsize) == 0);
-          assert(sel.isMolecular());
-          assert(find(sel.front()));
-          assert(find(sel.back()));
-          return sel;
-      }
+	   for ( auto i : *this ) {
+		   spc.trial[i] = vrot1(spc.trial[i]); // rotate coordinates
+		   spc.trial[i].rotate(vrot2);         // rotate internal coordinates
+	   }
 
-      /** @brief Scaling for isobaric and isochoric moves */
-      template<class Tspace>
-      void scale( Tspace &spc, Point &s, double xyz = 1, double xy = 1 )
-      {
-          if ( empty())
-              return;
+	   assert(spc.geo.dist(cm_trial, Geometry::massCenter(spc.geo,spc.trial,*this)) < 1e-9
+			   && "Rotation messed up mass center. Is the box too small?");
+	   if(spc.geo.dist(cm_trial, Geometry::massCenter(spc.geo,spc.trial,*this)) > 1e-9 ) 
+		cout << "rc: EA wrong!" << endl;
+       }
 
-          if ( isAtomic())
-          {
-              cm_trial = cm;
-              cm_trial.scale(spc.geo, s, xyz, xy);
-              for ( auto i : *this )
-                  spc.trial[i].scale(spc.geo, s, xyz, xy);
-              return;
-          }
 
-          if ( isMolecular())
-          {
-              assert(spc.geo.dist(cm, massCenter(spc)) < 1e-6);
-              assert(spc.geo.dist(cm, cm_trial) < 1e-7);
+       /**
+	* @brief Get the i'th molecule in the group
+	* @warning You must manually update the mass center of the returned group
+	*/
+       template<class Tgroup>
+	       void getMolecule( int i, Tgroup &sel ) const
+	       {
+		       sel.setfront(front() + i * molsize);
+		       sel.setback(sel.front() + molsize - 1);
+		       sel.setMolSize(sel.size());
 
-              Point newcm = cm;
-              newcm.scale(spc.geo, s, xyz, xy);
-              translate(spc, -cm);                 // move to origo
+		       assert(sel.molsize > 0);
+		       assert((sel.size() % molsize) == 0);
+		       assert(sel.isMolecular());
+		       assert(find(sel.front()));
+		       assert(find(sel.back()));
+	       }
 
-              Point oldlen = spc.geo.len; // store original volume
-              Point newlen = oldlen;
-              newlen.scale(spc.geo, s, xyz, xy);
-              spc.geo.setlen(newlen);         // apply trial volume
+       /**
+	* @brief Get the i'th molecule in the group
+	* @warning You must manually update the mass center of the returned group
+	*/
+       Group getMolecule( int i ) const
+       {
+	       Group sel(name, front() + i * molsize, front() + i * molsize + molsize - 1);
+	       sel.molId = this->molId;
+	       sel.setMolSize(molsize);
 
-              for ( auto i : *this )
-              {
-                  spc.trial[i] += newcm;            // move all particles to new cm
-                  spc.geo.boundary(spc.trial[i]);  // respect boundary conditions
-              }
-              cm_trial = newcm;
-              spc.geo.setlen(oldlen);         // restore original volume
-              return;
-          }
+	       assert(sel.back() <= this->back());
+	       assert(sel.molsize > 0);
+	       assert((sel.size() % molsize) == 0);
+	       assert(sel.isMolecular());
+	       assert(find(sel.front()));
+	       assert(find(sel.back()));
+	       return sel;
+       }
 
-          if ( isRange())
-          {
-              for ( int i = 0; i != numMolecules(); ++i )
-              {
-                  Group sel;
-                  getMolecule(i, sel);
-                  sel.setMassCenter(spc);
-                  sel.scale(spc, s, xyz, xy);
-              }
-              return;
-          }
-      }
+       /** @brief Scaling for isobaric and isochoric moves */
+       template<class Tspace>
+	       void scale( Tspace &spc, Point &s, double xyz = 1, double xy = 1 )
+	       {
+		       if ( empty())
+			       return;
 
-      /** @brief Undo move operation */
-      template<class Tspace>
-      void undo( Tspace &s )
-      {
-          for ( auto i : *this )
-              s.trial[i] = s.p[i];
-          cm_trial = cm;
-      }
+		       if ( isAtomic())
+		       {
+			       cm_trial = cm;
+			       cm_trial.scale(spc.geo, s, xyz, xy);
+			       for ( auto i : *this )
+				       spc.trial[i].scale(spc.geo, s, xyz, xy);
+			       return;
+		       }
 
-      /** @brief Accept a trial move */
-      template<class Tspace>
-      void accept( Tspace &s )
-      {
-          for ( auto i : *this )
-              s.p[i] = s.trial[i];
-          cm = cm_trial;
-      }
+		       if ( isMolecular())
+		       {
+			       assert(spc.geo.dist(cm, massCenter(spc)) < 1e-6);
+			       assert(spc.geo.dist(cm, cm_trial) < 1e-7);
 
-      /** @brief Write group data to stream */
-      friend std::ostream &operator<<( std::ostream &o, const Group &g )
-      {
-          o << g.front() << " " << g.back() << " "
-            << int(g.molId) << " " << g.molsize << " " << g.cm.transpose();
-          return o;
-      }
+			       Point newcm = cm;
+			       newcm.scale(spc.geo, s, xyz, xy);
+			       translate(spc, -cm);                 // move to origo
 
-      /** @brief Read group data from stream */
-      Group &operator<<( std::istream &in )
-      {
-          int front, back, id;
-          in >> front >> back >> id >> molsize;
-          setrange(front, back);
-          molId = PropertyBase::Tid(id);
-          assert(size() == back - front + 1 && "Problem with Group range");
-          cm.operator<<(in);
-          cm_trial = cm;
-          return *this;
-      }
+			       Point oldlen = spc.geo.len; // store original volume
+			       Point newlen = oldlen;
+			       newlen.scale(spc.geo, s, xyz, xy);
+			       spc.geo.setlen(newlen);         // apply trial volume
+
+			       for ( auto i : *this )
+			       {
+				       spc.trial[i] += newcm;            // move all particles to new cm
+				       spc.geo.boundary(spc.trial[i]);  // respect boundary conditions
+			       }
+			       cm_trial = newcm;
+			       spc.geo.setlen(oldlen);         // restore original volume
+			       return;
+		       }
+
+		       if ( isRange())
+		       {
+			       for ( int i = 0; i != numMolecules(); ++i )
+			       {
+				       Group sel;
+				       getMolecule(i, sel);
+				       sel.setMassCenter(spc);
+				       sel.scale(spc, s, xyz, xy);
+			       }
+			       return;
+		       }
+	       }
+
+       /** @brief Undo move operation */
+       template<class Tspace>
+	       void undo( Tspace &s )
+	       {
+		       for ( auto i : *this )
+			       s.trial[i] = s.p[i];
+		       cm_trial = cm;
+	       }
+
+       /** @brief Accept a trial move */
+       template<class Tspace>
+	       void accept( Tspace &s )
+	       {
+		       for ( auto i : *this )
+			       s.p[i] = s.trial[i];
+		       cm = cm_trial;
+	       }
+
+       /** @brief Write group data to stream */
+       friend std::ostream &operator<<( std::ostream &o, const Group &g )
+       {
+	       o << g.front() << " " << g.back() << " "
+		       << int(g.molId) << " " << g.molsize << " " << g.cm.transpose();
+	       return o;
+       }
+
+       /** @brief Read group data from stream */
+       Group &operator<<( std::istream &in )
+       {
+	       int front, back, id;
+	       in >> front >> back >> id >> molsize;
+	       setrange(front, back);
+	       molId = PropertyBase::Tid(id);
+	       assert(size() == back - front + 1 && "Problem with Group range");
+	       cm.operator<<(in);
+	       cm_trial = cm;
+	       return *this;
+       }
   };
 
   /** @brief Number of hydrophobic sites */
   template<class Tpvec, class Tindex>
-  int numHydrophobic( const Tpvec &p, const Tindex &g )
-  {
-      return std::count_if(g.begin(), g.end(),
-                           [&]( int i ) { return p[i].hydrophobic; });
-  }
+	  int numHydrophobic( const Tpvec &p, const Tindex &g )
+	  {
+		  return std::count_if(g.begin(), g.end(),
+				  [&]( int i ) { return p[i].hydrophobic; });
+	  }
 
   /**
    * @brief Summed valency of a set of particles
@@ -361,20 +399,20 @@ namespace Faunus
    * @param Z Starting charge (default: 0)
    */
   template<class Tparticle, class Talloc, class Tindex>
-  double netCharge( const std::vector<Tparticle, Talloc> &p, const Tindex &g, double Z = 0 )
-  {
-      for ( auto i : g )
-          Z += p[i].charge;
-      return Z;
-  }
+	  double netCharge( const std::vector<Tparticle, Talloc> &p, const Tindex &g, double Z = 0 )
+	  {
+		  for ( auto i : g )
+			  Z += p[i].charge;
+		  return Z;
+	  }
 
   template<class Titer>
-  double netCharge( const Titer &beg, const Titer &end, double Z = 0 )
-  {
-      for ( auto i = beg; i != end; i++ )
-          Z += i->charge;
-      return Z;
-  }
+	  double netCharge( const Titer &beg, const Titer &end, double Z = 0 )
+	  {
+		  for ( auto i = beg; i != end; i++ )
+			  Z += i->charge;
+		  return Z;
+	  }
 
 }//namespace
 #endif
