@@ -1234,6 +1234,7 @@ namespace Faunus
 				double dp_trans;   //!< Translational displacement parameter
 				double angle;      //!< Temporary storage for current angle
 				Point dir;         //!< Translation directions (default: x=y=z=1). This will be set by setGroup()
+				bool center_rotation;
 
 			public:
 
@@ -1282,6 +1283,7 @@ namespace Faunus
 			igroup = nullptr;
 			groupWiseEnergy = false;
 
+			center_rotation = j["center_rotation"];
 			base::fillMolList(j);// find molecules to be moved
 
 			for ( auto &i : this->mollist )
@@ -1330,21 +1332,34 @@ namespace Faunus
 
 				assert(igroup != nullptr);
 				Point p;
-
-				vector<double> tempA, tempB;
-
-				for (auto k : *igroup)
-					for (auto l : *igroup)
-						tempA.push_back( spc->geo.dist(spc->trial[k],spc->trial[l]) );
-
 				if ( dp_rot > 1e-6 )
 				{
-					//cout << "CM before rotation:" << igroup->cm.transpose() << endl;
+                                        //cout << "CM before rotation:" << igroup->cm.transpose() << endl;
 					p.ranunit(slump);             // random unit vector
-					p = igroup->cm + p;                    // set endpoint for rotation
+					
+					//p = igroup->cm + p;                    // set endpoint for rotation
+					//angle = dp_rot * slump.half();
+					//igroup->rotate(*spc, p, angle);
+					
+					
+					Point center = igroup->cm;
+					if(!center_rotation) {
+					  if(slump() < 0.5) {
+					    for(auto i : *igroup) {
+					      center = spc->trial[i];
+					      break;
+					    }
+					  } else {
+					    for(auto i : *igroup)
+					      center = spc->trial[i];
+					  }
+					}
+					p = center + p;
 					angle = dp_rot * slump.half();
-					igroup->rotate(*spc, p, angle);
-					//cout << "CM after rotation:" << igroup->cm.transpose() << endl;
+					igroup->newrotate(*spc,p,angle,center);
+					
+					
+                                        //cout << "CM after rotation:" << igroup->cm.transpose() << endl;
 				}
 				if ( dp_trans > 1e-6 )
 				{
@@ -1353,16 +1368,6 @@ namespace Faunus
 					p.z() = dir.z() * dp_trans * slump.half();
 					igroup->translate(*spc, p);
 				}
-
-
-				for (auto k : *igroup)
-					for (auto l : *igroup)
-						tempB.push_back( spc->geo.dist(spc->trial[k],spc->trial[l]) );
-
-				for(int k = 0; k < tempA.size(); k++)
-					if(fabs(tempA.at(k) - tempB.at(k)) > 1e-7)
-						cout << "Error in TranslateRotate!!" << endl;
-
 
 				// register the moved group but set the number of moved particles
 				// to zero. Doing so, it is assumed that all particles have been moved and
@@ -1418,6 +1423,7 @@ namespace Faunus
 			{
 				using namespace textio;
 				std::ostringstream o;
+				o << pad(SUB, w, "Center_rotation ") << center_rotation << endl;
 				o << pad(SUB, w, "Max. translation") << pm << dp_trans / 2 << textio::_angstrom << endl
 					<< pad(SUB, w, "Max. rotation") << pm << dp_rot / 2 * 180 / pc::pi << textio::degrees << endl;
 				if ( !directions.empty())
@@ -1906,13 +1912,12 @@ namespace Faunus
 				cindex.clear();
 				for ( auto i : *gmobile )
 					if ( ClusterProbability(spc->p, i) > slump())
-						cindex.push_back(i); // generate cluster list 
+						cindex.push_back(i); // generate cluster list
+
 				// rotation
 				Point p;
 				if ( dp_rot > 1e-6 )
 				{
-
-
 					base::angle = dp_rot * slump.half();
 					p.ranunit(slump);
 					p = igroup->cm + p; // set endpoint for rotation
@@ -2016,9 +2021,541 @@ namespace Faunus
 					}
 				return 0;
 			}
+			
+			
+			
+			
+			
+			
+			
+			
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+        template<class Tspace>
+            class ClusterMove : public TranslateRotate<Tspace>
+        {
+            protected:
+                typedef TranslateRotate<Tspace> base;
+                typedef typename Tspace::ParticleVector Tpvec;
+                typedef PropertyBase::Tid Tid;
+                using base::pot;
+                using base::w;
+                using base::cnt;
+                using base::igroup;
+		using base::center_rotation;
+                vector<double> dp_trans, dp_rot; // displacements for the different type of groups
+                vector<Point> dir;
+		vector<bool> spread_cluster;
+                vector<Group *> cindex; //!< index of mobile molecules to move with group
+                void _trialMove() override;
+                void _acceptMove() override;
+                void _rejectMove() override;
+                double _energyChange() override;
+                void getClusterAroundMolecule(Group *);
+		double cluster_probability;
+                string _info() override;
+                Average<double> avgsize; //!< Average number of ions in cluster
+                Average<double> avgbias; //!< Average bias
+                vector<vector<Tid>> gstatic;          //!< Pointer to group with potential cluster particles
+                virtual double ClusterProbability(Group &, Tpvec &, int ); //!< Probability that particle index belongs to cluster
+            public:
+                using base::spc;
+                ClusterMove( Energy::Energybase<Tspace> &, Tspace &, Tmjson &j );
+                virtual ~ClusterMove();
+                vector<double> threshold;        //!< Distance between particles to define a cluster
+        };
+
+        template<class Tspace>
+            ClusterMove<Tspace>::ClusterMove(
+                    Energy::Energybase<Tspace> &e, Tspace &s, Tmjson &j ) : base(e, s, j)
+            {
+                base::title = "Cluster " + base::title;
+                base::cite = "doi:10/cj9gnn";
+                gstatic.resize(spc->molecule.size());
+                threshold.resize(spc->molecule.size());
+                dp_rot.resize(spc->molecule.size());
+                dp_trans.resize(spc->molecule.size());
+                dir.resize(spc->molecule.size());
+		spread_cluster.resize(spc->molecule.size());
+                base::useAlternativeReturnEnergy=true; // yes, we Metropolis don't need internal energy change
+                for(unsigned int i = 0; i < gstatic.size(); i++)
+                    gstatic.at(i).resize(0);
+
+                auto m = j;
+		cluster_probability = m["cluster_probability"];
+		if(cluster_probability > 1.0)
+		  cluster_probability = 1.0;
+		if(cluster_probability < 0.0)
+		  cluster_probability = 0.0;
+                base::fillMolList(m);// find molecules to be moved
+
+                for ( auto &i : this->mollist )
+                {
+                    string centername = spc->molList()[i.first].name;
+                    auto staticmols = m[centername]["staticmol"];
+
+		    if (m.count("staticmol")>0)
+                        if (m["staticmol"].is_array()) {
+                            for (auto &name : m["staticmol"]) {
+                                string a = name.get<string>() ;
+				gstatic.at(int(i.first)).push_back(spc->findMolecules(a).at(0)->molId);	
+                            }
+                        }
+
+                    threshold.at(int(i.first)) = m[centername].at("threshold");
+                    dp_trans.at(int(i.first)) = m[centername].at("dp");
+                    dp_rot.at(int(i.first)) = m[centername].at("dprot");
+		    spread_cluster.at(int(i.first)) = m[centername].value("spread",true);
+                    Point temp(0,0,0);
+                    temp  << j.value("dir", string("1 1 1"));
+                    dir.at(int(i.first)) = temp;  // magic!
+                }
+            }
+
+        template<class Tspace>
+            ClusterMove<Tspace>::~ClusterMove() {}
+
+
+        template<class Tspace>
+            string ClusterMove<Tspace>::_info()
+            {
+                using namespace textio;
+                std::ostringstream o;
+                o << base::_info() << endl;
+		o << pad(SUB, w, "Cluster probability ") << cluster_probability << endl;
+                for (int i = 0; i < (int)threshold.size(); i++)
+                    o << pad(SUB, w, "Cluster threshold, mol ") << threshold.at(i) << _angstrom << endl;
+                if ( cnt > 0 )
+                {
+                    o << pad(SUB, w, "Average cluster size") << avgsize.avg() << endl;
+                    if ( threshold.at(0) > 1e-9 )
+                        o << pad(SUB, w, "Average bias") << avgbias.avg() << " (0=reject, 1=accept)\n";
+                }
+                return o.str();
+            }
+
+        template<class Tspace>
+            void ClusterMove<Tspace>::getClusterAroundMolecule(Group *g)
+            {
+                int cntI = 0;
+                for ( auto &i : spc->molList() ) { 	// For every type of molecule ...
+                    bool is_static = false; 	// Start to assume the molecule is not prohibited from being in cluster around molecule 'g'
+                    for( auto k : gstatic.at(int(g->molId)) ) { // For every group which is prohibited from being in cluster around molecule 'g' ...
+                        if(int(k) == cntI) { 	// Check if molecule 'i' is indeed prohibited from being in the cluster around molecule 'g'
+                            is_static = true; // If so then change assumed status
+                            break;		// No need to go through more elements in the list of prohibited molecules
+                        }
+                    }
+                    if(is_static)
+                        continue;
+                    // molecule type 'i' is not prohibited from being in the cluster around molecule 'g'
+
+                    auto gvec = spc->findMolecules(cntI); 	// Find all molecules of type 'i'
+                    for( auto g0 : gvec) { 			// For every molecule of type 'i' ...
+                        for(auto index : *g0) { 	// For every atom in molecule ...
+                            if ( ClusterProbability(*g,spc->p, index) > slump()) {
+                                // Include atom 'index' and thus also molecule 'g0'
+                                bool in_cluster = false;			
+                                for( unsigned int m = 0; m < cindex.size(); m++ ) {
+                                    if( *cindex.at(m) == *g0 ) {
+                                        in_cluster = true;
+                                        break;	
+                                    }	
+                                } 
+                                if(in_cluster)
+                                    break;
+                                cindex.push_back(g0); 			// If not then add molecule to cluster-list
+				if(spread_cluster.at(int(g->molId)))
+				  getClusterAroundMolecule(g0);	 	// Get cluster around added molecule
+                                break; // No need to go through any more atoms in the molecule
+                            }
+                        }
+                    }
+                    cntI++;
+                }
+            }
+
+
+        template<class Tspace>
+            void ClusterMove<Tspace>::_trialMove()
+            {
+                // if `mollist` has data, favor this over `setGroup()`
+                // Note that `currentMolId` is set by Movebase::move()
+                if ( !this->mollist.empty())
+                {
+                    auto gvec = spc->findMolecules(this->currentMolId);
+                    assert(!gvec.empty());
+                    igroup = *slump.element(gvec.begin(), gvec.end());
+                    assert(!igroup->empty());
+                }
+
+                assert(igroup != nullptr && "Group to move not defined");
+                // find clustered particlesi
+                cindex.clear();
+                cindex.push_back(igroup);
+                getClusterAroundMolecule(igroup);
+
+                // Check - can be removed
+                for(auto i : cindex) {
+                    Point cm_temp = i->cm - i->cm_trial;
+                    if( cm_temp.norm() > 1e-7 )
+                        cout << "Molecule and trial-molecule are not located at the same place!" << endl;
+                    for(auto k : *i) {
+                        Point temp = spc->p[k] - spc->trial[k];
+                        if( temp.norm() > 1e-7 )
+                            cout << "Particle and trial-particle are not located at the same place!" << endl;
+                    }
+                }
+
+                // rotation
+                Point p;
+
+                // Looking for the longest distance between particles in the cluster-groups 
+                // (to see if they are larger than half the box-length)
+
+                if ( dp_rot.at(int(this->currentMolId)) > 1e-6 )
+                {
+                    base::angle = dp_rot.at(int(this->currentMolId)) * slump.half();
+
+                    // Get maximum distance within any molecule
+                    double ald = 0.0;
+                    for (auto k : cindex)
+                        for (auto l : *k )
+                            for (auto m : *k ) {
+                                double ald_t = spc->geo.dist(spc->trial[l],spc->trial[m]);
+                                if(ald_t > ald)
+                                    ald = ald_t;
+                            }
+
+                    // Get maximum distance between cluster atoms and cluster center
+                    double ld = 0.0;
+                    Point cm = Geometry::trigoComCluster(spc->geo,spc->p, cindex);
+                    for ( auto i : cindex ) {
+                        for (auto l : *i) {
+                            double dist_t = spc->geo.dist(cm,spc->p[l]);
+                            if(dist_t > ld)
+                                ld = dist_t;
+                        }
+                    }
+                    ld  += ald; // add maximum internal distance to avoid that atoms in molecule are split up by PBC during rotation
+
+                    bool sqrt4_big = false;  // Is the cluster bigger than half the smallest box length?  
+                    if( (ld > spc->geo.len.x()*0.5) || ( ld > spc->geo.len.y()*0.5 ) || ( ld > spc->geo.len.z()*0.5 ))
+                        sqrt4_big = true;       // if some inter-atomic distance exceeds half the box length in any direction, cluster is considered "too big"
+
+                    if (!sqrt4_big) {          // we rotate only if the cluster is not too big
+		      
+		      Point cm(0,0,0);
+		      if(center_rotation) {
+                        cm = Geometry::trigoComCluster(spc->geo,spc->p, cindex);
+		      } else {
+			if(slump() < 0.5) {
+                        cm = cindex.at(0)->cm_trial;
+			} else {
+			cm = cindex.at(cindex.size()-1)->cm_trial;
+			}
+		      }
+                        for ( auto i : cindex ) {
+                            p.ranunit(slump);
+                            i->rotatecluster(*spc, cm+p, base::angle, cm);
+                        }
+                    } 
+                }
+                // translation
+                else {
+                    Point u;
+                    u.ranunit(slump);
+                    p = dp_trans.at(int(this->currentMolId)) * u * 0.5;
+                    for ( auto i : cindex )
+                        i->translate(*spc,p); 
+                }
+            }
+
+        template<class Tspace>
+            void ClusterMove<Tspace>::_acceptMove()
+            {
+                base::_acceptMove();
+                for ( auto k : cindex ) {
+                    k->accept(*spc);
+                }
+                avgsize += cindex.size();
+            }
+
+        template<class Tspace>
+            void ClusterMove<Tspace>::_rejectMove()
+            {
+                base::_rejectMove();
+                for ( auto k : cindex ) {
+                    k->undo(*spc);
+                }
+            }
+
+        template<class Tspace>
+            double ClusterMove<Tspace>::_energyChange()
+            {
+                double bias = 1;             // cluster bias -- see Frenkel 2nd ed, p.405
+
+                for (auto k : cindex ) {
+                    for(auto l : spc->groupList() ) {
+                        bool in_cluster = false;
+                        for(auto kt : cindex)
+                            if(*kt == *l) {
+                                in_cluster = true;
+                                break;
+                            } 
+
+                        if(in_cluster)
+                            break;
+                        // only gets here if 'l' is not in the cluster
+
+                        bool is_static = false;  // We check if 'l' is in the static list for this particular group
+                        for( auto m : gstatic.at(int(k->molId)))  {
+                            if( m == l->molId ) {
+                                is_static = true;
+                                break;
+                            }
+                        }
+                        if( !is_static ) {
+                            // 'l' is mobile and not in the cluster
+                            double a = 1.0;
+                            double b = 1.0;
+                            for(auto t : *l){ // for every atom in the 'l'-molecule...
+                                double at = ClusterProbability(*k,spc->trial, t); // Probability that atom 't' is in the trial-configuration cluster
+                                double bt = ClusterProbability(*k,spc->p, t);     // Probability that atom 't' is in the old-configuration cluster
+                                a *= (1.0 - at); // Multiply with probability that atom 't' is not in the trial-configuration cluster
+                                b *= (1.0 - bt); // Multiply with probability that atom 't' is not in the old-configuration cluster
+                            }
+                            a = 1.0 - a; // Probability that we included any of the trial-atoms in molecule 'l'
+                            b = 1.0 - b; // Probability that we included any of the old-atoms in molecule 'l'
+
+                            // Special cases for 'a' and/or 'b' is one/zero
+                            if( ( fabs(a-1.0) < 1e-9 ) && ( fabs(b-1.0) < 1e-9 ) ) {
+                                bias *= 1.0;
+                                continue;
+                            }
+                            if( ( fabs(a-1.0) < 1e-9 ) && ( fabs(b) < 1e-9 ) ) {
+                                return pc::infty;
+                            }
+                            if( ( fabs(a) < 1e-9 ) && ( fabs(b-1.0) < 1e-9 ) ) {
+                                return pc::infty;
+                            }
+                            if( ( fabs(a) < 1e-9 ) && ( fabs(b) < 1e-9 ) ) {
+                                bias *= 1.0;
+                                continue;
+                            }
+
+                            // Multiply bias (see Frenkel)
+                            bias *= (1-a)/(1-b);
+                        }
+                    }
+                }
+
+                avgbias += bias;
+                if ( bias < 1e-7 )
+                    return pc::infty;        // don't bother to continue with energy calculation
+
+                if ( dp_rot.at(int(this->currentMolId)) < 1e-6 && dp_trans.at(int(this->currentMolId)) < 1e-6 )
+                    return 0;
+
+                // container boundary collision?
+                for ( auto k : cindex ) 
+                    for( auto i : *k )   
+                        if ( spc->geo.collision(spc->trial[i], spc->trial[i].radius, Geometry::Geometrybase::BOUNDARY))
+                            return pc::infty;
+
+
+                // external potential on macromoleculei
+                double uext_new = 0.0;
+                for ( auto k : cindex ) 
+                    uext_new += pot->g_external(spc->trial, *k);
+
+                if ( uext_new == pc::infty )
+                    return pc::infty; //early rejection!
+                double uext_old = 0.0;
+                for ( auto k : cindex ) 
+                    uext_old += pot->g_external(spc->p, *k);
+
+                // pair energy between static and moved particles
+                // note: this could be optimized!
+                double u_c2nc_new = 0;   //cluster to non-cluster molecules
+                double u_c2nc_old = 0;
+#pragma omp parallel for reduction (+:du)
+
+                for (auto i : cindex)  {
+                    for (auto j : spc->groupList()) {
+                        bool in_cluster = false;
+                        for(auto t : cindex) {
+                            if(*j == *t) {
+                                in_cluster = true;
+                                break;
+                            }
+                        }
+                        if(!in_cluster) {
+                            u_c2nc_new += pot->g2g(spc->trial,*i,*j);
+                            u_c2nc_old += pot->g2g(spc->p,*i,*j) ;
+                        }
+                    }
+                }
+
+                double u_int_cluster_new = 0.0;   //cluster to cluster (internal)
+                double u_int_cluster_old = 0.0;
+                for(auto i : cindex)
+                    for(auto j : cindex)
+                        if( !(*i == *j) ) {
+                            u_int_cluster_new += 0.5* pot->g2g(spc->trial,*i,*j);
+                            u_int_cluster_old += 0.5*pot->g2g(spc->p,*i,*j) ;
+                        }
+
+                uext_old += u_int_cluster_old;
+                uext_new += u_int_cluster_new;
+
+                double du = u_c2nc_new - u_c2nc_old;
+
+                base::alternateReturnEnergy = ( uext_new - uext_old + du );
+                return ( uext_new - uext_old + du - log(bias) ); // exp[ -( dU-log(bias) ) ] = exp(-dU)*bias
+
+            }
+			
+		/**
+		 * This is the default function for determining the probability, P,
+		 * that a mobile particle is considered part of the cluster. This
+		 * is here a simple distance critera but derived classes can reimplement
+		 * this (virtual) function to arbitrary probability functions.
+		 */
+		template<class Tspace>
+			double ClusterMove<Tspace>::ClusterProbability(Group &centergroup, Tpvec &p, int i )
+			{
+				for ( auto j : centergroup ) // loop over main group
+					if ( i != j )
+					{
+						double r = threshold.at(int(centergroup.molId)) + p[i].radius + p[j].radius;
+						if ( spc->geo.sqdist(p[i], p[j]) < r * r )
+							return cluster_probability;
+					}
+				return 0.0;
+			}
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
 
 		template<class Tspace>
-			class ClusterMove : public TranslateRotate<Tspace>
+			class ClusterMove2 : public TranslateRotate<Tspace>
 		{
 			protected:
 				typedef TranslateRotate<Tspace> base;
@@ -2028,14 +2565,15 @@ namespace Faunus
 				using base::w;
 				using base::cnt;
 				using base::igroup;
-				vector<double> dp_trans, dp_rot; // displacements for the different type of groups
+				vector<double> dp_trans, dp_rot;
 				vector<Point> dir;
+				Geometry::QuaternionRotate vrot;
 				vector<Group *> cindex; //!< index of mobile molecules to move with group
 				void _trialMove() override;
 				void _acceptMove() override;
 				void _rejectMove() override;
 				double _energyChange() override;
-				void getClusterAroundMolecule(Group *);
+				void getClusterAroundMolecule(Group *,int);
 				string _info() override;
 				Average<double> avgsize; //!< Average number of ions in cluster
 				Average<double> avgbias; //!< Average bias
@@ -2043,13 +2581,13 @@ namespace Faunus
 				virtual double ClusterProbability(Group &, Tpvec &, int ); //!< Probability that particle index belongs to cluster
 			public:
 				using base::spc;
-				ClusterMove( Energy::Energybase<Tspace> &, Tspace &, Tmjson &j );
-				virtual ~ClusterMove();
+				ClusterMove2( Energy::Energybase<Tspace> &, Tspace &, Tmjson &j );
+				virtual ~ClusterMove2();
 				vector<double> threshold;        //!< Distance between particles to define a cluster
 		};
 
 		template<class Tspace>
-			ClusterMove<Tspace>::ClusterMove(
+			ClusterMove2<Tspace>::ClusterMove2(
 					Energy::Energybase<Tspace> &e, Tspace &s, Tmjson &j ) : base(e, s, j)
 			{
 				base::title = "Cluster " + base::title;
@@ -2091,11 +2629,11 @@ namespace Faunus
 			}
 
 		template<class Tspace>
-			ClusterMove<Tspace>::~ClusterMove() {}
+			ClusterMove2<Tspace>::~ClusterMove2() {}
 
 
 		template<class Tspace>
-			string ClusterMove<Tspace>::_info()
+			string ClusterMove2<Tspace>::_info()
 			{
 				using namespace textio;
 				std::ostringstream o;
@@ -2104,15 +2642,15 @@ namespace Faunus
 					o << pad(SUB, w, "Cluster threshold, mol ") << threshold.at(i) << _angstrom << endl;
 				if ( cnt > 0 )
 				{
-					o << pad(SUB, w, "Average cluster size") << avgsize.avg() << endl;
-					if ( threshold.at(0) > 1e-9 )
-						o << pad(SUB, w, "Average bias") << avgbias.avg() << " (0=reject, 1=accept)\n";
+				o << pad(SUB, w, "Average cluster size") << avgsize.avg() << endl;
+				if ( threshold.at(0) > 1e-9 )
+				o << pad(SUB, w, "Average bias") << avgbias.avg() << " (0=reject, 1=accept)\n";
 				}
 				return o.str();
 			}
 
 		template<class Tspace>
-			void ClusterMove<Tspace>::getClusterAroundMolecule(Group *g)
+			void ClusterMove2<Tspace>::getClusterAroundMolecule(Group *g, int cc)
 			{
 				int cntI = 0;
 				for ( auto &i : spc->molList() ) { 	// For every type of molecule ...
@@ -2142,18 +2680,26 @@ namespace Faunus
 								if(in_cluster)
 									break;
 								cindex.push_back(g0); 			// If not then add molecule to cluster-list
-								getClusterAroundMolecule(g0);	 	// Get cluster around added molecule
+								getClusterAroundMolecule(g0,cc+1); 	// Get cluster around added molecule
+                                                                //return;
+								//if ( std::find(cindex.begin(), cindex.end(), g0) == cindex.end() ) { // Is molecule already in the cluster?
+								//	cindex.push_back(g0); 			// If not then add molecule to cluster-list
+								//	getClusterAroundMolecule(g0,cc+1); 	// Get cluster around added molecule
+								//}
 								break; // No need to go through any more atoms in the molecule
 							}
 						}
 					}
 					cntI++;
 				}
+				// Line 2125
 			}
 
 
+
+
 		template<class Tspace>
-			void ClusterMove<Tspace>::_trialMove()
+			void ClusterMove2<Tspace>::_trialMove()
 			{
 				// if `mollist` has data, favor this over `setGroup()`
 				// Note that `currentMolId` is set by Movebase::move()
@@ -2163,143 +2709,196 @@ namespace Faunus
 					assert(!gvec.empty());
 					igroup = *slump.element(gvec.begin(), gvec.end());
 					assert(!igroup->empty());
+					//auto it = this->mollist.find(this->currentMolId);
 				}
 
 				assert(igroup != nullptr && "Group to move not defined");
 				// find clustered particlesi
 				cindex.clear();
 				cindex.push_back(igroup);
-				getClusterAroundMolecule(igroup);
-
-				// Check - can be removed
-				for(auto i : cindex) {
-					Point cm_temp = i->cm - i->cm_trial;
-					if( cm_temp.norm() > 1e-7 )
-						cout << "Molecule and trial-molecule are not located at the same place!" << endl;
-					for(auto k : *i) {
-						Point temp = spc->p[k] - spc->trial[k];
-						if( temp.norm() > 1e-7 )
-							cout << "Particle and trial-particle are not located at the same place!" << endl;
-					}
-				}
-
+				getClusterAroundMolecule(igroup,0);
 				// rotation
 				Point p;
 
-				// Looking for the longest distance between particles in the cluster-groups 
-				// (to see if they are larger than half the box-length)
+				Point longest(0,0,0);
+				double long_r = 0.0;
+				unsigned int index_x1 = 0;
+				unsigned int index_x2 = 0;
+				unsigned int index_y1 = 0;
+				unsigned int index_y2 = 0;
+				unsigned int index_z1 = 0;
+				unsigned int index_z2 = 0;
+				unsigned int index_r1 = 0;
+				unsigned int index_r2 = 0;
 
 				if ( dp_rot.at(int(this->currentMolId)) > 1e-6 )
 				{
 					base::angle = dp_rot.at(int(this->currentMolId)) * slump.half();
+					p.ranunit(slump);
 
-					// Get maximum distance within any molecule
-					double ald = 0.0;
-					for (auto k : cindex)
-						for (auto l : *k )
-							for (auto m : *k ) {
-								double ald_t = spc->geo.dist(spc->trial[l],spc->trial[m]);
-								if(ald_t > ald)
-									ald = ald_t;
+					for ( unsigned int  i = 0; i < cindex.size()-1; i++ ) {
+						for ( unsigned int  j = i+1; j < cindex.size(); j++ ) {
+							//	for ( auto j : cindex ) 
+							//			if ( !(*i==*j) ) 
+							//		for ( auto k : *i ) 
+							//			for ( auto l : *j )         
+							for ( auto k : *cindex.at(i) ) {
+								for ( auto l : *cindex.at(j) ) {     
+									double r = spc->geo.dist(spc->trial[k],spc->trial[l]);  // we get the vector v of the longest inter-atomic distance
+									double temp_x = fabs(spc->trial[k].x() - spc->trial[l].x()); 
+									double temp_y = fabs(spc->trial[k].y() - spc->trial[l].y());
+									double temp_z = fabs(spc->trial[k].z() - spc->trial[l].z());									
+									if(long_r < r) {
+										long_r = r;
+										index_r1 = i;
+										index_r2 = j;
+									}					
+									if(temp_x > longest.x()) {    // find longest inter-atomic distance in the x, y and z directions
+										index_x1 = i;
+										index_x2 = j;
+										longest.x() = temp_x;  
+									}
+									if(temp_y > longest.y()) {
+										index_y1 = i;
+										index_y2 = j;
+										longest.y() = temp_y;
+									}
+									if(temp_z > longest.z()) {
+										index_z1 = i;
+										index_z2 = j;
+										longest.z() = temp_z;
+									}
+
+								}
+
 							}
 
-					// Get maximum distance between cluster atoms and cluster center
-					double ld = 0.0;
-					Point cm = Geometry::trigoComCluster(spc->geo,spc->p, cindex);
-					for ( auto i : cindex ) {
-						for (auto l : *i) {
-							double dist_t = spc->geo.dist(cm,spc->p[l]);
-							if(dist_t > ld)
-								ld = dist_t;
 						}
 					}
-					ld  += ald; // add maximum internal distance to avoid that atoms in molecule are split up by PBC during rotation
-					
-					bool sqrt4_big = false;  // Is the cluster bigger than half the smallest box length?  
-					if( (ld > spc->geo.len.x()*0.5) || ( ld > spc->geo.len.y()*0.5 ) || ( ld > spc->geo.len.z()*0.5 ))
+
+					bool sqrt4_big = false;    
+					//if( (longest.x() > spc->geo.len.x()*0.5) || ( longest.y() > spc->geo.len.y()*0.5 ) || ( longest.z() > spc->geo.len.z()*0.5 ))
+					//	sqrt4_big = true;       // if some inter-atomic distance exceeds half the box length in any direction, cluster is considered "too big"
+					if( (long_r > spc->geo.len.x()*0.5) || ( long_r > spc->geo.len.y()*0.5 ) || ( long_r > spc->geo.len.z()*0.5 ))
 						sqrt4_big = true;       // if some inter-atomic distance exceeds half the box length in any direction, cluster is considered "too big"
 
+/*
+					double largest_distance = longest.x();   // we get the longest inter-atomic distance for later rotation
+					unsigned int index1 = index_x1;
+					unsigned int index2 = index_x2;
+					if ( longest.y() > largest_distance ) {
+						largest_distance = longest.y();
+						index1 = index_y1;
+						index2 = index_y2;
+					}
+					if ( longest.z() > largest_distance ) {
+						largest_distance = longest.z();
+						index1 = index_z1;
+						index2 = index_z2;
+					}
+					*/
+					unsigned int index1 = index_r1;
+					unsigned int index2 = index_r2;
+
+                                        //sqrt4_big=false;
 					if (!sqrt4_big) {          // we rotate only if the cluster is not too big
-						Point cm = Geometry::trigoComCluster(spc->geo,spc->p, cindex);
-						for ( auto i : cindex ) {
+                                                //cout << "CSIZE = " << cindex.size() << endl;
+                                                //cout << "P:" << p.transpose() << endl;
+                                                //cout << "CM before trial:" << cindex.at(0)->cm_trial.transpose() << endl;
+						//vrot.setAxis(spc->geo, Point(0,0,0), p, base::angle); // rot. around line CM->p
+						//for(auto i : cindex) {
+							//i->rotate(*spc, p, base::angle, Point(0,0,0));
+							//i->rotate(*spc, i->cm_trial+p, base::angle);// internal rotation of dipoles etc etc
+							//	Point cm_trial  = i->cm_trial;
+							//i->translate(*spc,-cm_trial);	// we translate all the cluster so that the middle of the vector v is now in the center (0,0,0) of the box
+						//i->translate(*spc,cm_trial);	// we translate all the cluster so that the middle of the vector v is now in the center (0,0,0) of the box
+						//}
+                                                //cout << "CM after trial:" << cindex.at(0)->cm_trial.transpose() << endl;
 
-							Point cmb = i->cm_trial; // only for check
-							Point ntrb = spc->trial[i->back()]; // only for check
+						//cout << "We rotate!" << endl;
 
-							vector<double> tempA, tempB; // only for check
-
-							// only for check
-							for (auto k : *i)
-								for (auto l : *i)
-									tempA.push_back( spc->geo.dist(spc->trial[k],spc->trial[l]) );
-
-							p.ranunit(slump);
-							i->rotatecluster(*spc, cm+p, base::angle, cm);
-
-
-							Point cm2 = Geometry::trigoComCluster(spc->geo,spc->trial, cindex);
-							// only for check
-							for (auto k : *i)
-								for (auto l : *i)
-									tempB.push_back( spc->geo.dist(spc->trial[k],spc->trial[l]) );
-
-							int cnt = 0;
-							for (auto k : *i) {
-								for (auto l : *i) {
-									if(fabs(tempA.at(cnt) - tempB.at(cnt)) > 1e-7) {
-										cout << "Error in ClusterMove! " << k << ", " << l << endl;
-										cout << "coordB: " << spc->p[k].transpose() << ", " << spc->p[l].transpose() << endl;
-										cout << "coordA: " << spc->trial[k].transpose() << ", " << spc->trial[l].transpose() << endl;
-										cout << "cmrotB:" << cm.transpose() << endl;
-										cout << "cmrotA:" << cm2.transpose() << endl;
-										cout << tempA.at(cnt) << "/" << tempB.at(cnt) << endl;
-									}
-									cnt++;                                                                         
-								}
-							}
-							Point cma = i->cm_trial;
-							Point ntra = spc->trial[i->back()];
-							if (fabs((cma-ntra).norm()) > 1e-8 || fabs((cmb-ntrb).norm()) > 1e-8) {
-								cout <<  "cma:" << cma.transpose() << endl;
-								cout <<  "cmb:" << cmb.transpose() << endl;
-								cout <<  "ntra:" << ntra.transpose() << endl;
-								cout <<  "ntrb:" << ntrb.transpose() << endl;
-							}
-
+						
+						Point cm = Geometry::clusterMassCenter(spc->geo,spc->trial,cindex);
+/*						Point v = spc->geo.vdist(cindex.at(index1)->cm_trial,cindex.at(index2)->cm_trial);  // we get the vector v of the longest inter-atomic distance
+						Point origin = cindex.at(index2)->cm_trial + 0.5*v;	 // we get the middle of the vector v
+						spc->geo.boundary(origin);
+						Point cm(0,0,0);
+						double mc = 0.0;   // mc is the molecular weight (mw) of the cluster
+						for( auto i : cindex ) {
+							i->translate(*spc,-origin);	// we translate all the cluster so that the middle of the vector v is now in the center (0,0,0) of the box
+							double m = 0.0;   // m is the mw of the group i
+							for ( auto j : *i ) 
+								m += spc->trial[j].mw;   
+							mc += m;         
+							cm += i->cm_trial * m;   // we weigth the coordinates of each group by its mw  
 						}
-					} 
+						cm /= mc;            // we divide by the total mw of the cluster, so we get the coordinates of the center of mass of the cluster
+                                                cout << "CM calc:" << cm.transpose() << endl;
+                                                cout << "CM trial:" << cindex.at(0)->cm_trial.transpose() << endl;
+                                                cout << "origin" << origin.transpose() << endl;
+                                                cout << "CM mol:" << cindex.at(0)->cm.transpose() << endl;
+                                                cout << "V:" << v.transpose() << endl;
+*/						//p = cm + p;   // set endpoint for rotation
+						//vrot.setAxis(spc->geo, cm, cm+p, base::angle); // rot. around line CM->p
+						for ( auto i : cindex ) {
+                                                        i->newrotate(*spc, cm+p, base::angle, cm);
+							//i->translate(*spc,-cm);	// we translate all the cluster so that the middle of the vector v is now in the center (0,0,0) of the box
+							//i->cm_trial.rotate(vrot); // internal rotation of dipole moments etc etc
+							//i->cm_trial = vrot(i->cm_trial); // rotation of coordinates
+							//i->translate(*spc,origin+cm);
+							//Point diff = i->cm_trial - i->cm;
+							//for(auto p0 : *i) 
+							//	spc->trial[p0].translate(spc->geo,diff);
+						}
+
+						//cm += origin;
+						//spc->geo.boundary(cm);
+					} else {
+						//cout << "Cluster sqrt4 big!" << endl;
+					}
 				}
 				// translation
-				else {
-					Point u;
-					u.ranunit(slump);
-					p = dp_trans.at(int(this->currentMolId)) * u * 0.5;
+				if ( dp_trans.at(int(this->currentMolId)) > 1e-6 )
+				{
+                                        //assert(1==2 && "We should not get here. BS");
+                                        Point u;
+                                        u.ranunit(slump);
+                                        //u = (u * dp_trans.at(int(this->currentMolId))).cwiseProduct( dir.at(int(this->currentMolId))  ); 
+					p.x() = dir.at(int(this->currentMolId)).x() * dp_trans.at(int(this->currentMolId)) * slump.half();
+					p.y() = dir.at(int(this->currentMolId)).y() * dp_trans.at(int(this->currentMolId)) * slump.half();
+					p.z() = dir.at(int(this->currentMolId)).z() * dp_trans.at(int(this->currentMolId)) * slump.half();
 					for ( auto i : cindex )
 						i->translate(*spc,p); 
 				}
+
 			}
 
 		template<class Tspace>
-			void ClusterMove<Tspace>::_acceptMove()
+			void ClusterMove2<Tspace>::_acceptMove()
 			{
 				base::_acceptMove();
 				for ( auto k : cindex ) {
-					k->accept(*spc);
+					for(auto i : *k )  
+						spc->p[i] = spc->trial[i];
+					k->cm = k->cm_trial;	
 				}
 				avgsize += cindex.size();
 			}
 
 		template<class Tspace>
-			void ClusterMove<Tspace>::_rejectMove()
+			void ClusterMove2<Tspace>::_rejectMove()
 			{
 				base::_rejectMove();
 				for ( auto k : cindex ) {
-					k->undo(*spc);
+					for(auto i : *k)   
+						spc->trial[i] = spc->p[i];
+					k->cm_trial = k->cm;
 				}
+				//avgsize += 0;
 			}
 
 		template<class Tspace>
-			double ClusterMove<Tspace>::_energyChange()
+			double ClusterMove2<Tspace>::_energyChange()
 			{
 				double bias = 1;             // cluster bias -- see Frenkel 2nd ed, p.405
 
@@ -2314,29 +2913,27 @@ namespace Faunus
 
 						if(in_cluster)
 							break;
-						// only gets here if 'l' is not in the cluster
 
-						bool is_static = false;  // We check if 'l' is in the static list for this particular group
+
+						bool is_static = false;
 						for( auto m : gstatic.at(int(k->molId)))  {
 							if( m == l->molId ) {
 								is_static = true;
 								break;
 							}
 						}
+						// 'l' is mobile
 						if( !is_static ) {
-							// 'l' is mobile and not in the cluster
 							double a = 1.0;
 							double b = 1.0;
-							for(auto t : *l){ // for every atom in the 'l'-molecule...
-								double at = ClusterProbability(*k,spc->trial, t); // Probability that atom 't' is in the trial-configuration cluster
-								double bt = ClusterProbability(*k,spc->p, t);     // Probability that atom 't' is in the old-configuration cluster
-								a *= (1.0 - at); // Multiply with probability that atom 't' is not in the trial-configuration cluster
-								b *= (1.0 - bt); // Multiply with probability that atom 't' is not in the old-configuration cluster
+							for(auto t : *l){
+								double at = ClusterProbability(*k,spc->trial, t);
+								double bt = ClusterProbability(*k,spc->p, t);
+								a *= (1.0 - at);
+								b *= (1.0 - bt);
 							}
-							a = 1.0 - a; // Probability that we included any of the trial-atoms in molecule 'l'
-							b = 1.0 - b; // Probability that we included any of the old-atoms in molecule 'l'
-
-							// Special cases for 'a' and/or 'b' is one/zero
+							a = 1.0 - a;
+							b = 1.0 - b;
 							if( ( fabs(a-1.0) < 1e-9 ) && ( fabs(b-1.0) < 1e-9 ) ) {
 								bias *= 1.0;
 								continue;
@@ -2351,8 +2948,6 @@ namespace Faunus
 								bias *= 1.0;
 								continue;
 							}
-
-							// Multiply bias (see Frenkel)
 							bias *= (1-a)/(1-b);
 						}
 					}
@@ -2405,6 +3000,22 @@ namespace Faunus
 					}
 				}
 
+				/*				for (auto i : spc->groupList())
+								for (auto j : spc->groupList())
+								if ( !(*i==*j) )
+								du += 0.5 * ( pot->g2g(spc->trial,*i,*j) - pot->g2g(spc->p,*i,*j) );
+				 */				 
+				/*				for(auto i : cindex)   //cindex 
+								for(auto j : spc->groupList())
+								if( !(*i == *j) )
+								du += ( pot->g2g(spc->trial,*i,*j) - pot->g2g(spc->p,*i,*j) );
+
+								for(auto i : cindex)
+								for(auto j : cindex)
+								if( !(*i == *j) )
+								du -= 0.5*( pot->g2g(spc->trial,*i,*j) - pot->g2g(spc->p,*i,*j) );
+				 */
+
 				double u_int_cluster_new = 0.0;   //cluster to cluster (internal)
 				double u_int_cluster_old = 0.0;
 				for(auto i : cindex)
@@ -2413,11 +3024,15 @@ namespace Faunus
 							u_int_cluster_new += 0.5* pot->g2g(spc->trial,*i,*j);
 							u_int_cluster_old += 0.5*pot->g2g(spc->p,*i,*j) ;
 						}
+				//cout << "Diff int cluster: " << (u_int_cluster_new-u_int_cluster_old) << ", New int cluster " << u_int_cluster_new << endl;
 
-				uext_old += u_int_cluster_old;
-				uext_new += u_int_cluster_new;
+                                uext_old += u_int_cluster_old;
+                                uext_new += u_int_cluster_new;
 
+				double oldE = pot->systemEnergy(spc->p);
+				double newE = pot->systemEnergy(spc->trial);
 				double du = u_c2nc_new - u_c2nc_old;
+				//cout << "Correct: " << newE << ", " << oldE << ", approx: " <<  unew << ", " <<  uold << ", " << u_c2nc_new << ", " << u_c2nc_old << endl;
 
 				base::alternateReturnEnergy = ( uext_new - uext_old + du );
 				return ( uext_new - uext_old + du - log(bias) ); // exp[ -( dU-log(bias) ) ] = exp(-dU)*bias
@@ -2431,7 +3046,7 @@ namespace Faunus
 		 * this (virtual) function to arbitrary probability functions.
 		 */
 		template<class Tspace>
-			double ClusterMove<Tspace>::ClusterProbability(Group &centergroup, Tpvec &p, int i )
+			double ClusterMove2<Tspace>::ClusterProbability(Group &centergroup, Tpvec &p, int i )
 			{
 				for ( auto j : centergroup ) // loop over main group
 					if ( i != j )

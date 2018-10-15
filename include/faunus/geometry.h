@@ -73,7 +73,7 @@ namespace Faunus
         virtual void boundary( Point & ) const =0;             //!< Apply boundary conditions to a point
         virtual void scale( Point &, Point &, const double, const double ) const;  //!< Scale point
         virtual double sqdist( const Point &a, const Point &b ) const =0; //!< Squared distance between two points
-        virtual Point vdist( const Point &, const Point & ) const =0;  //!< Distance in vector form
+        virtual Point vdist( const Point &, const Point & )=0;  //!< Distance in vector form
 
         virtual Cuboid inscribe() const; //!< Inscribe geometry in a cuboid
 
@@ -123,7 +123,7 @@ namespace Faunus
         /**
 	 * @warning Not true!
 	 */
-        inline Point vdist(const Point &a, const Point &b) const override { return a-b; }
+        inline Point vdist(const Point &a, const Point &b) override { return a-b; }
 
         void scale(Point&, Point &, const double, const double) const override; //!< Linear scaling along radius (NPT ensemble)
 
@@ -162,7 +162,7 @@ namespace Faunus
             return (a - b).squaredNorm();
         }
 
-        inline Point vdist( const Point &a, const Point &b ) const override { return a - b; }
+        inline Point vdist( const Point &a, const Point &b ) override { return a - b; }
 
         void scale( Point &,
                     Point &,
@@ -234,7 +234,7 @@ namespace Faunus
             // return (d-k.cast<double>().cwiseProduct(len)).squaredNorm();
         }
 
-        inline Point vdist( const Point &a, const Point &b ) const override
+        inline Point vdist( const Point &a, const Point &b ) override
         {
             Point r = a - b;
             if ( r.x() > len_half.x())
@@ -293,7 +293,7 @@ namespace Faunus
             return dx * dx + dy * dy + dz * dz;
         }
 
-        inline Point vdist( const Point &a, const Point &b ) const override
+        inline Point vdist( const Point &a, const Point &b ) override
         {
             Point r(a - b);
             if ( r.x() > len_half.x())
@@ -322,7 +322,7 @@ namespace Faunus
         CuboidNoPBC();
         CuboidNoPBC( Tmjson & );
 
-        inline Point vdist( const Point &a, const Point &b ) const override { return a - b; }
+        inline Point vdist( const Point &a, const Point &b ) override { return a - b; }
 
         inline double sqdist( const Point &a, const Point &b ) const override { return (a - b).squaredNorm(); }
 
@@ -366,7 +366,7 @@ namespace Faunus
             return (a - b).squaredNorm();
         }
 
-        inline Point vdist( const Point &a, const Point &b ) const override
+        inline Point vdist( const Point &a, const Point &b ) override
         {
             return a - b;
         }
@@ -399,7 +399,7 @@ namespace Faunus
             return dx * dx + dy * dy + dz * dz;
         }
 
-        inline Point vdist( const Point &a, const Point &b ) const override
+        inline Point vdist( const Point &a, const Point &b ) override
         {
             Point r = a - b;
             if ( r.z() > _halflen )
@@ -445,8 +445,7 @@ namespace Faunus
         }
         return cm;
     }
-
-
+    
     /**
      * @brief Calculate geometrical center of cluster of groups
      * @param spc Space
@@ -473,6 +472,53 @@ namespace Faunus
 		    }
 		    geo.boundary(com); // is this really needed?
 		    return com;
+	    }
+
+
+     /**
+     * @brief Calculate center of cluster of groups
+     * @param geo Geometry
+     * @param p Particle vector
+     * @param g Vector of pointers to range of particle index (`Group`, `vector<int>`, ...)
+     * @param weight Weight function
+     *
+     * The weight function is typically a lambda function that takes a particle
+     * as an argument and returns the weight, for example Mw, charge, or unity
+     * for mass center, charge center, or geometric center. Functions for
+     * these three examples are predefined.
+     */
+    template<class Tgeo, class Tpvec, class TGroup, class Tweightf>
+    Point clusterCenter( const Tgeo &geo, const Tpvec &p, const vector<TGroup *> g, Tweightf weight )
+    {
+        assert(g.size() <= (int) p.size());
+        Point cm(0, 0, 0);
+        if ( !g.empty())
+        {
+		Point o = p[g.at(0)->front() + (g.at(0)->back() - g.at(0)->front()) * 0.5];  // set origo to middle particle
+		double sum = 0;
+		for(auto k : g)  {
+			for ( auto i : *k )
+			{
+				Point t = p[i] - o;       // translate to origo
+				geo.boundary(t);        // periodic boundary (if any)
+				cm += t * weight(p[i]);
+				sum += weight(p[i]);
+			}
+		}
+		if ( fabs(sum) < 1e-6 )
+			sum = 1;
+		cm = cm / sum + o;
+		geo.boundary(cm);
+	}
+	return cm;
+    }
+
+    /** @brief Calculate mass center of cluster of particles */
+    template<class Tgeo, class Tpvec, class TGroup>
+	    Point clusterMassCenter( const Tgeo &geo, const Tpvec &p, const vector<TGroup *> g )
+	    {
+		    return clusterCenter(geo, p, g,
+				    []( const typename Tpvec::value_type &x ) { return x.mw; });
 	    }
 
 
